@@ -1,0 +1,4 @@
+UseTab: false
+IndentWidth: 2
+BreakBeforeBraces: Allman
+ColumnLimit: 80
