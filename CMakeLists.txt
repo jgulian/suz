@@ -25,6 +25,7 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 add_executable(suz 
     src/main.cpp 
 
+    src/algorithm.cpp
     src/codegen.cpp
     src/driver.cpp
     src/syntax.cpp

@@ -93,12 +93,12 @@ item:
 
 struct_definition:
   "struct" "identifier" "{" parameter_list "}" { 
-    parsing_driver.result.struct_definitions.emplace_back($2, YY_MOVE($4)); 
+    parsing_driver.result.type_definitions.emplace_back(YY_MOVE(struct_definition($2, YY_MOVE($4)))); 
   };
 
 enum_definition:
   "enum" "identifier" "{" variant_list "}" { 
-    parsing_driver.result.enum_definitions.emplace_back($2, YY_MOVE($4)); 
+    parsing_driver.result.type_definitions.emplace_back(YY_MOVE(enum_definition($2, YY_MOVE($4)))); 
   };
 
 variant_list:

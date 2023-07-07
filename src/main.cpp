@@ -21,5 +21,10 @@ int main(int argc, char **argv)
   parsing_driver.trace_parsing = false;
   parsing_driver.parse(file_text, "test.suz");
 
+  std::cout << parsing_driver.result.type_definitions.size() << std::endl;
+
   codegen generator("test", std::move(parsing_driver.result));
+  generator.perform();
+
+  std::cout << std::endl;
 }

@@ -22,3 +22,7 @@ fn main() {
 fn square(a: u32) -> u32 {
     a * a
 }
+
+fn wrap(a: u32) -> b {
+    
+}
