@@ -1,28 +1,28 @@
 struct a {
-    a1: u32, 
-    a2: f32,
-    a3: b,
+    a1: usize, 
+    a2: fsize,
+    a3: b
 }
 
 struct b {
-    b1: u32,
+    b1: usize
 }
 
 enum c {
-    Test(f32),
-    This(u32),
+    Test((usize, fsize)),
+    This(usize)
 }
 
-fn main() {
-    let a: u32 = read_u32();
-    let b: u32 = square(a);
-    print(a, b);
+fun main() {
+    let a: usize = read_usize();
+    let b: usize = square(a);
+    print(a, b)
 }
 
-fn square(a: u32) -> u32 {
-    a * a
+fun square(a: usize) -> b {
+    wrap(a * a)
 }
 
-fn wrap(a: u32) -> b {
-    
+fun wrap(a: usize) -> b {
+    B { b1: 1 }
 }

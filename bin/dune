@@ -1,0 +1,4 @@
+(executable
+ (public_name suz)
+ (name main)
+ (libraries suz parsing))
