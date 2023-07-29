@@ -1,10 +1,6 @@
-# Suz (sʌzi) an imperative programming language with effects
+# Suz (sʌzi) a programming langauge to expirement
 
-Inspiration
- * https://www.eff-lang.org/
- * https://boats.gitlab.io/blog/post/the-problem-of-effects/
- * https://github.com/rust-lang/rfcs/pull/73
- * https://internals.rust-lang.org/t/can-we-make-a-rusty-effect-system/11697
- * A-effects in Rust-lang RFSc has a lot
-
- I think some 
+This is a programming language for me to implement plt ideas I find 
+interesting. The compiler does some basic type-checking and then it translates
+to a c-like ir with if-statements, goto, structs, unions, functions and 
+pointers. This ir is sent to c++ to be translated to llvm ir to be compiled.

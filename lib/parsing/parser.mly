@@ -15,8 +15,8 @@
 %token RBRACK
 %token LPAREN
 %token RPAREN
-%token LBLOCK
-%token RBLOCK
+//%token LBLOCK
+//%token RBLOCK
 %token LANGLE
 %token RANGLE
 %token COLON
@@ -41,20 +41,19 @@
 %type <code_block> code_block
 %type <code_block> statements
 %type <statement> statement
-%type <assignment> assignment
+%type <statement> assignment
 %type <data_type> type_annotation
 %type <expression> expression
-%type <binary_expression> binary_expression
+%type <expression> binary_expression
 %type <binary_operation> binary_operation
-%type <call_expression> call_expression
-%type <struct_construction_expression> struct_construction_expression
+%type <expression> call_expression
+%type <expression> struct_construction_expression
 %type <string * expression> struct_construction_parameter
 %type <data_type> return_type
 %type <struct_definition> struct_definition
 %type <string * data_type> struct_field
 %type <enum_definition> enum_definition
 %type <string * data_type> enum_variant
-%type <string list> generic_definition
 %type <data_type> data_type
 
 %left ADD SUBTRACT LANGLE RANGLE
@@ -75,8 +74,8 @@ item:
   ;
 
 function_definition:
-  | FUN IDENTIFIER loption(generic_definition) LPAREN separated_list(COMMA, parameter) RPAREN return_type? code_block 
-    { {name = $2; function_generics = $3; parameters = $5; return_type = Option.value $7 ~default:VoidType; block = $8; } }
+  | FUN IDENTIFIER LPAREN separated_list(COMMA, parameter) RPAREN return_type? code_block 
+    { {name = $2; parameters = $4; return_type = Option.value $6 ~default:VoidType; block = $7; } }
   ;
 
 (** Same as struct_field but whatever *)
@@ -93,13 +92,13 @@ statements:
   | statement statements { let (lst, expr) = $2 in $1 :: lst, expr }
 
 %inline statement:
-  | assignment SCOLON { Assignment $1 }
+  | assignment SCOLON { $1 }
   | expression SCOLON { Expression $1 }
   ;
 
 (** Support explicit type definition? *)
 assignment: 
-  | LET boption(MUT) IDENTIFIER ioption(type_annotation) EQUALS expression { $3, $6, $2 }
+  | LET boption(MUT) IDENTIFIER type_annotation EQUALS expression { Assignment ($3, $4, $6) }
   ;
 
 type_annotation:
@@ -107,17 +106,17 @@ type_annotation:
   ;
 
 expression:
-  | binary_expression { BinaryExpression $1 }
-  | call_expression { CallExpression $1 }
-  | struct_construction_expression { StructConstructionExpression $1 }
+  | binary_expression { $1 }
+  | call_expression { $1 }
+  | struct_construction_expression { $1 }
   | LPAREN expression RPAREN { $2 }
   | IDENTIFIER { VariableExpression $1 }
-  | INT_LITERAL { LiteralExpression (Number ({ format = Signed; byte_count = None; }, float_of_int $1)) }
-  | FLOAT_LITERAL { LiteralExpression (Number ({ format = Float; byte_count = None; }, $1)) }
+  | INT_LITERAL { LiteralExpression (Number (Signed, float_of_int $1)) }
+  | FLOAT_LITERAL { LiteralExpression (Number (Float, $1)) }
   ;
 
 binary_expression:
-  | expression binary_operation expression { { lhs = $1; op = $2; rhs = $3; } }
+  | expression binary_operation expression { BinaryExpression { lhs = $1; op = $2; rhs = $3; } }
   ;
 
 %inline binary_operation:
@@ -130,12 +129,12 @@ binary_expression:
   ;
 
 call_expression:
-  | expression PERIOD IDENTIFIER LPAREN separated_list(COMMA, expression) RPAREN { $3, List.cons $1 $5 }
-  | IDENTIFIER LPAREN separated_list(COMMA, expression) RPAREN { $1, $3 }
+  | expression PERIOD IDENTIFIER LPAREN separated_list(COMMA, expression) RPAREN { CallExpression ($3, List.cons $1 $5) }
+  | IDENTIFIER LPAREN separated_list(COMMA, expression) RPAREN { CallExpression ($1, $3) }
   ;
 
 struct_construction_expression:
-  | IDENTIFIER LBRACK separated_list(COMMA, struct_construction_parameter) RBRACK { $1, $3 }
+  | IDENTIFIER LBRACK separated_list(COMMA, struct_construction_parameter) RBRACK { StructConstructionExpression ($1, $3) }
   ;
 
 struct_construction_parameter:
@@ -147,8 +146,8 @@ return_type:
   ;
 
 struct_definition:
-  | STRUCT IDENTIFIER loption(generic_definition) LBRACK separated_list(COMMA, struct_field) RBRACK 
-    { {struct_name = $2; struct_generics = $3; fields = $5} }
+  | STRUCT IDENTIFIER LBRACK separated_list(COMMA, struct_field) RBRACK 
+    { {struct_name = $2; fields = $4} }
   ;
 
 struct_field:
@@ -156,22 +155,18 @@ struct_field:
   ;
 
 enum_definition:
-  | ENUM IDENTIFIER loption(generic_definition) LBRACK separated_list(COMMA, enum_variant) RBRACK 
-    { { enum_name = $2; enum_generics = $3; variants = $5; } }
+  | ENUM IDENTIFIER LBRACK separated_list(COMMA, enum_variant) RBRACK 
+    { { enum_name = $2; variants = $4; } }
   ;
 
 enum_variant:
   | IDENTIFIER LPAREN data_type RPAREN { $1, $3 }
   ;
 
-generic_definition:
-  | LBLOCK separated_nonempty_list(COMMA, IDENTIFIER) RBLOCK { $2 }
-  ;
-
 data_type:
-  | USIZE { NumericType { format = Unsigned; byte_count = None } }
-  | ISIZE { NumericType { format = Signed; byte_count = None } }
-  | FSIZE { NumericType { format = Float; byte_count = None } }
+  | USIZE { NumericType (Unsigned, None) }
+  | ISIZE { NumericType (Signed, None) }
+  | FSIZE { NumericType (Float, None) }
   | IDENTIFIER { NamedType $1 }
   | LPAREN separated_nonempty_list(COMMA, data_type) RPAREN { Tuple $2 }
   ;

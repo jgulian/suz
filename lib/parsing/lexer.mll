@@ -31,8 +31,8 @@ rule token = parse
   | "}"      { RBRACK }
   | "("      { LPAREN }
   | ")"      { RPAREN }
-  | "["      { LBLOCK }
-  | "]"      { RBLOCK }
+  (*| "["      { LBLOCK }
+  | "]"      { RBLOCK }*)
   | "<"      { LANGLE }
   | ">"      { RANGLE }
   | ":"      { COLON }

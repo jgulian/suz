@@ -1,0 +1,3 @@
+(library
+ (name compilation)
+ (libraries syntax core llvm))
