@@ -1,24 +1,14 @@
-struct a {
-    a1: usize, 
-    a2: fsize,
-    a3: b
-}
+ext read_int() -> usize;
 
-struct b {
-    b1: usize
-}
+ext print_int(usize) -> ();
 
 fun main() -> usize {
-    let a: usize = 1;
-    let b: usize = square(a);
-    let c: usize = square(b);
-    square(c)
+    let a: usize = read_int();
+    let b: usize = double(a);
+    let c: usize = double(b);
+    print_int(c)
 }
 
-fun square(a: usize) -> usize {
-    a * a
-}
-
-fun wrap(a: usize) -> b {
-    b { b1: 1 }
+fun double(a: usize) -> usize {
+    a + a
 }
