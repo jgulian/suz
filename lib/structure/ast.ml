@@ -10,11 +10,13 @@ type numeric_format = Floating | Signed | Unsigned
 
 and data_type =
   | Void of location_information
+  | Bool of location_information
   | Numeric of numeric_format * location_information
 
 and binary_operation =
   | Add of location_information
   | Sub of location_information
+  | Equals of location_information
 
 and expression =
   | VoidData of location_information
@@ -26,8 +28,10 @@ and expression =
 and statement =
   | Expression of expression * location_information
   | Assignment of string * data_type * expression * location_information
+  | If of expression * code_block * location_information
+  | While of expression * code_block * location_information
 
-and code_block = statement list * expression * location_information
+and code_block = statement list * expression option * location_information
 
 module Extern = struct
   type t = {
@@ -52,21 +56,24 @@ type item =
   | Extern of Extern.t * location_information
   | Function of Function.t * location_information
 
+let print_li li =
+  let a, b = li.lines in
+  let c, d = li.columns in
+  Printf.sprintf "%s, %d-%d, %d-%d" li.file a b c d
+
+let print_nf f =
+  match f with
+  | Floating -> "Floating"
+  | Signed -> "Signed"
+  | Unsigned -> "Unsigned"
+
+let rec nt n = if n = 0 then "" else "\t" ^ nt (n - 1)
+
 let debug_print items =
-  let print_li li =
-    let a, b = li.lines in
-    let c, d = li.columns in
-    Printf.sprintf "%s, %d-%d, %d-%d" li.file a b c d
-  in
-  let print_nf f =
-    match f with
-    | Floating -> "Floating"
-    | Signed -> "Signed"
-    | Unsigned -> "Unsigned"
-  in
   let print_dt dt =
     match dt with
     | Void li -> Printf.sprintf "Void (%s)" (print_li li)
+    | Bool li -> Printf.sprintf "Bool (%s)" (print_li li)
     | Numeric (f, li) ->
         Printf.sprintf "Numeric (%s, (%s))" (print_nf f) (print_li li)
   in
@@ -75,6 +82,7 @@ let debug_print items =
     match bo with
     | Add li -> Printf.sprintf "Add (%s)" (print_li li)
     | Sub li -> Printf.sprintf "Sub (%s)" (print_li li)
+    | Equals li -> Printf.sprintf "Equals (%s)" (print_li li)
   in
   let rec print_expr expr =
     match expr with
@@ -93,28 +101,39 @@ let debug_print items =
   and print_expr_list expr_list =
     String.concat ~sep:", " (List.map ~f:print_expr expr_list)
   in
-  let print_stmt stmt =
+  let rec print_stmt stmt i =
     match stmt with
     | Expression (expr, li) ->
         Printf.sprintf "Expression (%s, %s)" (print_expr expr) (print_li li)
     | Assignment (name, dt, expr, li) ->
         Printf.sprintf "Assignment (%s, %s, %s, %s)" name (print_dt dt)
           (print_expr expr) (print_li li)
-  in
-  let rec nt n = if n = 0 then "" else "\t" ^ nt (n - 1) in
-  let print_cb (stmts, expr, li) i =
+    | If (expr, body, li) ->
+        let tabs = nt i in
+        Printf.sprintf
+          "If {\n%sCondition: %s\n%sBody: %s\n%sLocationInfo: (%s) }" tabs
+          (print_expr expr) tabs
+          (print_cb body (i + 1))
+          tabs (print_li li)
+    | While (expr, body, li) ->
+        let tabs = nt i in
+        Printf.sprintf
+          "While {\n%sCondition: %s\n%sBody: %s\n%sLocationInfo: (%s) }" tabs
+          (print_expr expr) tabs
+          (print_cb body (i + 1))
+          tabs (print_li li)
+  and print_cb (stmts, expr, li) i =
     let print_stmt_elem stmt =
-      Printf.sprintf "%s%s" (nt (i + 1)) (print_stmt stmt)
+      Printf.sprintf "%s%s" (nt (i + 1)) (print_stmt stmt (i + 1))
     in
     let stmts_end = if List.is_empty stmts then "" else "\n" in
     let stmts = String.concat ~sep:"\n" (List.map ~f:print_stmt_elem stmts) in
     Printf.sprintf
       "CodeBlock {\n\
        %sStatements:\n\
-       %s\
-       %sFinalExpression: %s\n\
-       %sLocationInfo: (%s) }" (nt i)
-      (stmts ^ stmts_end) (nt i) (print_expr expr) (nt i) (print_li li)
+       %s%sFinalExpression: %s\n\
+       %sLocationInfo: (%s) }" (nt i) (stmts ^ stmts_end) (nt i)
+      (Option.value ~default:"None" (Option.map ~f:print_expr expr)) (nt i) (print_li li)
   in
   let print_ext (ext : Extern.t) i =
     Printf.sprintf

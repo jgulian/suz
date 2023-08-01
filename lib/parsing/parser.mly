@@ -5,6 +5,8 @@
 %token FUN
 %token EXT
 %token LET
+%token IF
+%token WHILE
 %token LBRACK
 %token RBRACK
 %token LPAREN
@@ -13,6 +15,7 @@
 %token SCOLON
 %token COMMA
 %token EQUALS
+%token DEQUALS
 %token ADD
 %token SUB
 %token ARROW
@@ -32,7 +35,7 @@
 %type <Structure.Ast.binary_operation> binary_operation
 %type <Structure.Ast.data_type> data_type
 
-%left ADD SUB
+%left ADD SUB DEQUALS (* This might be wrong for DEQUALS *)
 
 %start items
 
@@ -64,6 +67,8 @@ statements:
 %inline statement:
   | LET IDENTIFIER COLON data_type EQUALS expression SCOLON { Ast.Assignment ($2, $4, $6, Ast.li $loc) }
   | expression SCOLON { Ast.Expression ($1, Ast.li $loc) }
+  | IF condition=expression; body=code_block { Ast.If (condition, body, Ast.li $loc)  }
+  | WHILE condition=expression; body=code_block { Ast.While (condition, body, Ast.li $loc) }
   ;
 
 expression:
@@ -78,6 +83,7 @@ expression:
 %inline binary_operation:
   | ADD { Ast.Add (Ast.li $loc) }
   | SUB { Ast.Sub (Ast.li $loc) }
+  | DEQUALS { Ast.Equals (Ast.li $loc) }
   ;
 
 data_type:

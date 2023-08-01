@@ -2,13 +2,23 @@ ext read_int() -> usize;
 
 ext print_int(usize) -> ();
 
-fun main() -> usize {
+fun main() -> () {
     let a: usize = read_int();
     let b: usize = double(a);
     let c: usize = double(b);
-    print_int(c)
+    let d: usize = a + b + c;
+    print_int(d);
+
+    let e: usize = read_int();
+    let e: usize = sub_one(e);
+    print_int(e)
 }
 
 fun double(a: usize) -> usize {
-    a + a
+    a + a + a
 }
+
+fun sub_one(a: usize) -> usize {
+    a - 2_usize
+}
+

@@ -32,6 +32,8 @@ rule token = parse
   | "fun"    { FUN }
   | "ext"    { EXT }
   | "let"    { LET }
+  | "if"     { IF }
+  | "while"  { WHILE }
   | "{"      { LBRACK }
   | "}"      { RBRACK }
   | "("      { LPAREN }
@@ -40,6 +42,7 @@ rule token = parse
   | ";"      { SCOLON }
   | ","      { COMMA }
   | "="      { EQUALS }
+  | "=="     { DEQUALS }
   | "+"      { ADD }
   | "-"      { SUB }
   | "->"     { ARROW }

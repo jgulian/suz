@@ -9,7 +9,8 @@ let pos_string pos =
 
 let parse_channel c file =
   let lexbuf = Lexing.from_channel c in
-  if Option.is_some file then set_filename lexbuf (Option.value_exn file) else ();
+  if Option.is_some file then set_filename lexbuf (Option.value_exn file)
+  else ();
   try Parser.items Lexer.token lexbuf
   with Parser.Error ->
     raise (Failure ("Syntax Error at " ^ pos_string lexbuf.lex_curr_p))
