@@ -20,7 +20,7 @@ let () =
     Llvm.dump_module main_mod;
     Full.create_build_dir ".build";
     Llvm.print_module ".build/test.ll" main_mod;
-    Full.compile ".build/test.ll" ["runtime/io.c"] ".build/main"
+    Full.compile ".build/test.ll" [ "runtime/io.c" ] ".build/main"
   with e ->
     close_in_noerr input_channel;
     let str = Printexc.to_string e and stack = Printexc.get_backtrace () in

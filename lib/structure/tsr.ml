@@ -41,7 +41,7 @@ type statement =
   | Assignment of string * data_type * expression * location_information
   | Conditional of expression * code_block * bool * location_information
 
-and code_block = statement list * expression * data_type * location_information
+and code_block = statement list * expression option * location_information
 
 module Extern = struct
   type t = {
@@ -117,15 +117,18 @@ let debug_print { externs; functions } =
           tabs
           (print_cb body (i + 1))
           tabs repeated tabs (Ast.print_li li)
-  and print_cb (stmts, final_expr, dt, li) i =
+  and print_cb (stmts, final_expr, li) i =
     let tabs = Ast.nt i in
     let body =
       String.concat ~sep:(",\n\t" ^ tabs)
         (List.map ~f:(fun x -> print_stmt x (i + 1)) stmts)
     in
-    let body = body ^ "\n\t" ^ tabs ^ print_expr final_expr (i + 1) in
-    Printf.sprintf "CodeBlock %s, (%s), \n%s%s" (print_dt dt) (Ast.print_li li)
-      tabs body
+    let final_expr =
+      Option.value ~default:"None"
+        (Option.map ~f:(fun x -> print_expr x (i + 1)) final_expr)
+    in
+    let body = body ^ "\n\t" ^ tabs ^ final_expr in
+    Printf.sprintf "CodeBlock (%s), \n%s%s" (Ast.print_li li) tabs body
   in
   let print_func { Function.name; return_type; parameters; body; location } i =
     let tabs = Ast.nt i in

@@ -10,3 +10,7 @@ uintptr_t read_int(void) {
 void print_int(uintptr_t data) {
   printf("%lu\n", data);
 }
+
+void newline(void) {
+  puts("");
+}

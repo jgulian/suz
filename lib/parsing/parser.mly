@@ -29,7 +29,7 @@
 %type <Structure.Ast.item> item
 %type <string * Structure.Ast.data_type> parameter
 %type <Structure.Ast.code_block> code_block
-%type <Structure.Ast.statement list * Structure.Ast.expression> statements
+%type <Structure.Ast.statement list * Structure.Ast.expression option> statements
 %type <Structure.Ast.statement> statement
 %type <Structure.Ast.expression> expression
 %type <Structure.Ast.binary_operation> binary_operation
@@ -61,7 +61,8 @@ code_block:
   ;
 
 statements:
-  | expression { ([], $1) }
+  | expression SCOLON { ([Ast.Expression ($1, Ast.li $loc)], None) } 
+  | expression { ([], Some $1) }
   | statement statements { let (lst, expr) = $2 in $1 :: lst, expr }
 
 %inline statement:

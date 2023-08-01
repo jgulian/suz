@@ -133,7 +133,8 @@ let debug_print items =
        %sStatements:\n\
        %s%sFinalExpression: %s\n\
        %sLocationInfo: (%s) }" (nt i) (stmts ^ stmts_end) (nt i)
-      (Option.value ~default:"None" (Option.map ~f:print_expr expr)) (nt i) (print_li li)
+      (Option.value ~default:"None" (Option.map ~f:print_expr expr))
+      (nt i) (print_li li)
   in
   let print_ext (ext : Extern.t) i =
     Printf.sprintf

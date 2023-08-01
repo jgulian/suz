@@ -45,7 +45,9 @@ let rec map_code_block (stmts, final_expr, li)
     | Ast.Binary (lhs, rhs, op, li) ->
         let lhs = map_expr lhs in
         let rhs = map_expr rhs in
-        let ty = match op with Ast.Equals _ -> Tsr.Bool | _ -> Tsr.expr_type lhs in
+        let ty =
+          match op with Ast.Equals _ -> Tsr.Bool | _ -> Tsr.expr_type lhs
+        in
         Tsr.Call (map_op_to_name op (Tsr.expr_type lhs), [ lhs; rhs ], ty, li)
     | Ast.Call (name, args, li) ->
         let args = List.map ~f:map_expr args in
@@ -102,9 +104,8 @@ let rec map_code_block (stmts, final_expr, li)
           (expr, map_code_block body named_values function_types, true, li)
   in
   let stmts = List.map ~f:map_stmt stmts in
-  let final_expr = map_expr final_expr in
-  let final_expr_ty = Tsr.expr_type final_expr in
-  (stmts, final_expr, final_expr_ty, li)
+  let final_expr = Option.map ~f:map_expr final_expr in
+  (stmts, final_expr, li)
 
 let map_extern i =
   match i with
@@ -131,7 +132,9 @@ let map_function i function_types =
           name;
           location;
           body =
-            map_code_block body (parameters_to_scope parameters location) function_types;
+            map_code_block body
+              (parameters_to_scope parameters location)
+              function_types;
         }
   | _ -> None
 

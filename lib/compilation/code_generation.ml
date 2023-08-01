@@ -177,6 +177,7 @@ let codegen_fun func context current_mod =
         let condition_bb =
           append_block context generate_basic_block_name func
         in
+        let _ = build_br condition_bb builder in
         let taken_bb = append_block context generate_basic_block_name func in
         let not_taken_bb =
           append_block context generate_basic_block_name func
@@ -195,19 +196,31 @@ let codegen_fun func context current_mod =
         in
         position_at_end taken_bb builder;
         codegen_code_block body (fun _ _ -> ());
+        let _ =
+          if repeated then build_br condition_bb builder
+          else build_br not_taken_bb builder
+        in
         position_at_end not_taken_bb builder
-  and codegen_code_block (stmts, final_expr, _, _) f =
+  and codegen_code_block (stmts, final_expr, _) f =
     List.iter ~f:codegen_stmt stmts;
     let final_value =
-      codegen_expr final_expr (context, current_mod, builder, named_values)
+      Option.map
+        ~f:(fun x ->
+          codegen_expr x (context, current_mod, builder, named_values))
+        final_expr
     in
     f final_value final_expr
   in
   let insert_ret value expr =
     let _ =
-      match expr_type expr with
+      match Option.value ~default:Void (Option.map ~f:expr_type expr) with
       | Void -> build_ret_void builder
-      | _ -> build_ret value builder
+      | _ ->
+          build_ret
+            (Option.value_exn
+               ~message:"internal error value final expr not same optional"
+               value)
+            builder
     in
     ()
   in
