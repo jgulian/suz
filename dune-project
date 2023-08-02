@@ -20,7 +20,7 @@
  (name suz)
  (synopsis "The Suz programming language")
  (description "A language for me to experiment with plt concepts.")
- (depends ocaml dune menhir llvm core)
+ (depends ocaml dune menhir llvm core ocamlgraph)
  (tags
   (pl types)))
 

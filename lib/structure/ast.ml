@@ -12,22 +12,29 @@ and data_type =
   | Void of location_information
   | Bool of location_information
   | Numeric of numeric_format * location_information
+  | Tuple of data_type list * location_information
+  | Named of string * location_information
 
 and binary_operation =
   | Add of location_information
   | Sub of location_information
+  | Mul of location_information
   | Equals of location_information
+  | NotEquals of location_information
+  | Less of location_information
+  | Greater of location_information
 
 and expression =
-  | VoidData of location_information
   | Literal of float * data_type option * location_information
   | Variable of string * location_information
   | Binary of expression * expression * binary_operation * location_information
   | Call of string * expression list * location_information
+  | TupleAccess of expression * int * location_information
 
 and statement =
   | Expression of expression * location_information
   | Assignment of string * data_type * expression * location_information
+  | Reassignment of string * expression * location_information
   | If of expression * code_block * location_information
   | While of expression * code_block * location_information
 
@@ -55,6 +62,7 @@ end
 type item =
   | Extern of Extern.t * location_information
   | Function of Function.t * location_information
+  | Type of string * data_type * location_information
 
 let print_li li =
   let a, b = li.lines in
@@ -70,23 +78,30 @@ let print_nf f =
 let rec nt n = if n = 0 then "" else "\t" ^ nt (n - 1)
 
 let debug_print items =
-  let print_dt dt =
+  let rec print_dt dt =
     match dt with
     | Void li -> Printf.sprintf "Void (%s)" (print_li li)
     | Bool li -> Printf.sprintf "Bool (%s)" (print_li li)
     | Numeric (f, li) ->
         Printf.sprintf "Numeric (%s, (%s))" (print_nf f) (print_li li)
+    | Tuple (factors, li) ->
+        let factors = String.concat ~sep:", " (List.map ~f:print_dt factors) in
+        Printf.sprintf "Tuple (%s, (%s))" factors (print_li li)
+    | Named (name, li) -> Printf.sprintf "Named (%s, (%s))" name (print_li li)
   in
   let print_dt_l dt_l = String.concat ~sep:", " (List.map ~f:print_dt dt_l) in
   let print_bo bo =
     match bo with
     | Add li -> Printf.sprintf "Add (%s)" (print_li li)
     | Sub li -> Printf.sprintf "Sub (%s)" (print_li li)
+    | Mul li -> Printf.sprintf "Mul (%s)" (print_li li)
     | Equals li -> Printf.sprintf "Equals (%s)" (print_li li)
+    | NotEquals li -> Printf.sprintf "NotEquals (%s)" (print_li li)
+    | Less li -> Printf.sprintf "LessThan (%s)" (print_li li)
+    | Greater li -> Printf.sprintf "GreaterThan (%s)" (print_li li)
   in
   let rec print_expr expr =
     match expr with
-    | VoidData li -> Printf.sprintf "VoidData (%s)" (print_li li)
     | Literal (v, dt, li) ->
         Printf.sprintf "Literal (%f, %s, (%s))" v
           (Option.value ~default:"None" (Option.map ~f:print_dt dt))
@@ -98,16 +113,22 @@ let debug_print items =
     | Call (name, args, li) ->
         Printf.sprintf "Call (%s, (%s), (%s))" name (print_expr_list args)
           (print_li li)
+    | TupleAccess (expr, index, li) ->
+        Printf.sprintf "TupleAccess (%s, %d, (%s))" (print_expr expr) index
+          (print_li li)
   and print_expr_list expr_list =
     String.concat ~sep:", " (List.map ~f:print_expr expr_list)
   in
   let rec print_stmt stmt i =
     match stmt with
     | Expression (expr, li) ->
-        Printf.sprintf "Expression (%s, %s)" (print_expr expr) (print_li li)
+        Printf.sprintf "Expression (%s, (%s))" (print_expr expr) (print_li li)
     | Assignment (name, dt, expr, li) ->
-        Printf.sprintf "Assignment (%s, %s, %s, %s)" name (print_dt dt)
+        Printf.sprintf "Assignment (%s, %s, %s, (%s))" name (print_dt dt)
           (print_expr expr) (print_li li)
+    | Reassignment (name, expr, li) ->
+        Printf.sprintf "Reassignment (%s, %s, (%s))" name (print_expr expr)
+          (print_li li)
     | If (expr, body, li) ->
         let tabs = nt i in
         Printf.sprintf
@@ -167,6 +188,9 @@ let debug_print items =
     match it with
     | Extern (ext, _) -> print_ext ext (i + 1)
     | Function (f, _) -> print_fun f (i + 1)
+    | Type (name, alias, li) ->
+        Printf.sprintf "Type (%s, %s, (%s))\n" name (print_dt alias)
+          (print_li li)
   in
   String.concat ~sep:"\n" (List.map ~f:(fun i -> print_item i 0) items)
 
@@ -176,7 +200,7 @@ let parse_numeric_type s li =
   let ty =
     match String.get s 0 with
     | 'f' -> Floating
-    | 's' -> Signed
+    | 'i' -> Signed
     | 'u' -> Unsigned
     | _ -> raise (Invalid_argument "not well formatted numeric literal")
   in

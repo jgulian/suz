@@ -1,29 +1,74 @@
-ext read_int() -> usize;
+ext read_usize() -> usize;
+ext read_isize() -> isize;
+ext read_fsize() -> fsize;
 
-ext print_int(usize) -> ();
+ext print_usize(usize) -> ();
+ext print_isize(isize) -> ();
+ext print_fsize(fsize) -> ();
 
 ext newline() -> ();
 
+type A = (B, B);
+type B = fsize;
+type C = A;
+
 fun main() -> () {
-    let a: usize = read_int();
+    let base: fsize = read_fsize();
+    let power: usize = read_usize();
+    print_fsize(pow(base, power));
+}
+
+fun test_calling() -> () {
+    let a: usize = read_usize();
     let b: usize = double(a);
     let c: usize = double(b);
     let d: usize = a + b + c;
-    print_int(d);
+    print_usize(d);
+}
 
-    newline();
-
-    let e: usize = read_int();
+fun test_subtraction() -> () {
+    let e: usize = read_usize();
     let e: usize = sub_one(e);
-    print_int(e);
+    print_usize(e);
+}
 
-    newline();
-
-    let f: usize = read_int();
+fun test_if_statement() -> () {
+    let f: usize = read_usize();
     if f == 1_usize {
-        print_int(23_usize);
+        print_usize(23_usize);
     }
-    print_int(42_usize);
+    print_usize(42_usize);
+}
+
+fun test_assignment() -> () {
+    let a: usize = read_usize();
+    if a == 0_usize {
+        a := 14_usize;
+    }
+    print_usize(a);
+}
+
+fun test_type_reassign() -> () {
+    let a: usize = read_usize();
+    let a: isize = 0_isize;
+}
+
+fun test_while(a: usize, b: usize) -> usize {
+    let result: usize = 1_usize;
+    while (b > 0_usize) {
+        result := result * a;
+        b := b - 1_usize;
+    }
+    result
+}
+
+fun pow(a: fsize, b: usize) -> fsize {
+    let result: fsize = 1_fsize;
+    while (b > 0_usize) {
+        result := result * a;
+        b := b - 1_usize;
+    }
+    result
 }
 
 fun double(a: usize) -> usize {
@@ -33,4 +78,3 @@ fun double(a: usize) -> usize {
 fun sub_one(a: usize) -> usize {
     a - 2_usize
 }
-

@@ -6,13 +6,7 @@ open Core
 exception Unexpected_type of string
 exception Internal_issue of string
 
-let define_void_type context =
-  let void_ty = named_struct_type context "_void_type" in
-  struct_set_body void_ty (Array.of_list []) false
-
-let get_void_value context = const_struct context (Array.of_list [])
-
-let get_data_type dt context =
+let rec get_data_type dt context =
   match dt with
   | Void -> void_type context
   | Bool -> i1_type context
@@ -21,59 +15,68 @@ let get_data_type dt context =
       | Floating -> double_type context
       | Signed -> i64_type context
       | Unsigned -> i64_type context)
+  | Tuple factors ->
+      struct_type context
+        (Array.of_list (List.map ~f:(fun x -> get_data_type x context) factors))
+  | Named (name, _) -> named_struct_type context name
 
 let generate_operator_functions context current_mod =
-  let name = "_add__u" in
-  let dt = get_data_type (Numeric Unsigned) context in
-  let function_ty = function_type dt (Array.of_list [ dt; dt ]) in
-  let func = define_function name function_ty current_mod in
-  let builder = builder_at_end context (entry_block func) in
-  let a, b =
-    match Array.to_list (params func) with
-    | [ a; b ] -> (a, b)
-    | _ ->
-        raise
-          (Internal_issue
-             ("incorrect number of arguments in operator function " ^ name))
+  let generate_operator_function op ty inst =
+    let name = Lowering.map_op_to_name op ty in
+    let return_ty = get_data_type (Lowering.op_return_type op ty) context in
+    let ty = get_data_type ty context in
+    let func_ty = function_type return_ty (Array.of_list [ ty; ty ]) in
+    let func = define_function name func_ty current_mod in
+    let builder = builder_at_end context (entry_block func) in
+    let a, b =
+      match Array.to_list (params func) with
+      | [ a; b ] -> (a, b)
+      | _ ->
+          raise
+            (Internal_issue
+               ("incorrect number of arguments in operator function " ^ name))
+    in
+    let _ = build_ret (inst a b "" builder) builder in
+    ()
   in
-  let _ = build_ret (build_add a b "" builder) builder in
-  (* Split *)
-  let name = "_sub__u" in
-  let dt = get_data_type (Numeric Unsigned) context in
-  let function_ty = function_type dt (Array.of_list [ dt; dt ]) in
-  let func = define_function name function_ty current_mod in
-  let builder = builder_at_end context (entry_block func) in
-  let a, b =
-    match Array.to_list (params func) with
-    | [ a; b ] -> (a, b)
-    | _ ->
-        raise
-          (Internal_issue
-             ("incorrect number of arguments in operator function " ^ name))
-  in
-  let _ = build_ret (build_sub a b "" builder) builder in
-  (*Split *)
-  let name = "_equals__u" in
-  let dt = get_data_type (Numeric Unsigned) context in
-  let return_type = get_data_type Bool context in
-  let function_ty = function_type return_type (Array.of_list [ dt; dt ]) in
-  let func = define_function name function_ty current_mod in
-  let builder = builder_at_end context (entry_block func) in
-  let a, b =
-    match Array.to_list (params func) with
-    | [ a; b ] -> (a, b)
-    | _ ->
-        raise
-          (Internal_issue
-             ("incorrect number of arguments in operator function " ^ name))
-  in
-  let _ = build_ret (build_icmp Icmp.Eq a b "" builder) builder in
-  ()
+  let li = { Ast.file = ""; lines = (0, 0); columns = (0, 0) } in
+  generate_operator_function (Ast.Add li) (Numeric Unsigned) build_add;
+  generate_operator_function (Ast.Add li) (Numeric Signed) build_add;
+  generate_operator_function (Ast.Add li) (Numeric Floating) build_fadd;
+  generate_operator_function (Ast.Sub li) (Numeric Unsigned) build_sub;
+  generate_operator_function (Ast.Sub li) (Numeric Signed) build_sub;
+  generate_operator_function (Ast.Sub li) (Numeric Floating) build_fsub;
+  generate_operator_function (Ast.Mul li) (Numeric Unsigned) build_mul;
+  generate_operator_function (Ast.Mul li) (Numeric Signed) build_mul;
+  generate_operator_function (Ast.Mul li) (Numeric Floating) build_fmul;
+  generate_operator_function (Ast.Equals li) (Numeric Unsigned)
+    (build_icmp Icmp.Eq);
+  generate_operator_function (Ast.Equals li) (Numeric Signed)
+    (build_icmp Icmp.Eq);
+  generate_operator_function (Ast.Equals li) (Numeric Floating)
+    (build_fcmp Fcmp.Oeq);
+  generate_operator_function (Ast.NotEquals li) (Numeric Unsigned)
+    (build_icmp Icmp.Ne);
+  generate_operator_function (Ast.NotEquals li) (Numeric Signed)
+    (build_icmp Icmp.Ne);
+  generate_operator_function (Ast.NotEquals li) (Numeric Floating)
+    (build_fcmp Fcmp.One);
+  generate_operator_function (Ast.Less li) (Numeric Unsigned)
+    (build_icmp Icmp.Ult);
+  generate_operator_function (Ast.Less li) (Numeric Signed)
+    (build_icmp Icmp.Slt);
+  generate_operator_function (Ast.Less li) (Numeric Floating)
+    (build_fcmp Fcmp.Olt);
+  generate_operator_function (Ast.Greater li) (Numeric Unsigned)
+    (build_icmp Icmp.Ugt);
+  generate_operator_function (Ast.Greater li) (Numeric Signed)
+    (build_icmp Icmp.Sgt);
+  generate_operator_function (Ast.Greater li) (Numeric Floating)
+    (build_fcmp Fcmp.Ogt)
 
 let rec codegen_expr expr build_context =
   let context, current_mod, builder, named_values = build_context in
   match expr with
-  | VoidData _ -> get_void_value context
   | Literal (v, dt, li) -> (
       match dt with
       | Numeric format -> (
@@ -91,8 +94,9 @@ let rec codegen_expr expr build_context =
         Printf.sprintf "unknown variable reference %s at (%s)" name
           (Ast.print_li li)
       in
-      let value = Hashtbl.find named_values name in
-      Option.value_exn ~message:error value
+      let pointer = Hashtbl.find named_values name in
+      let pointer, _ = Option.value_exn ~message:error pointer in
+      build_load pointer "" builder
   | Call (function_name, args, _, li) ->
       let func_error =
         Printf.sprintf "unknown function reference %s at (%s)" function_name
@@ -107,6 +111,11 @@ let rec codegen_expr expr build_context =
       in
       let args = Array.of_list (List.map ~f:codegen_expr_map args) in
       build_call func args "" builder
+
+let codegen_alias (name, alias) context =
+  let ty = named_struct_type context name in
+  let body = get_data_type alias context in
+  struct_set_body ty (Array.create ~len:1 body) false
 
 let codegen_shallow_fun { Tsr.Function.name; return_type; parameters; _ }
     context current_mod =
@@ -128,33 +137,29 @@ let codegen_ext { Tsr.Extern.name; return_type; parameters; _ } context
   set_linkage Linkage.External func
 
 let codegen_fun func context current_mod =
-  let { Tsr.Function.name; parameters; body; location; _ } = func in
+  let { Tsr.Function.name; parameters; body; _ } = func in
   let func = Option.value_exn (lookup_function name current_mod) in
   let builder = builder_at_end context (entry_block func) in
-  let arguments =
-    List.map2
-      ~f:(fun (name, _) value -> (name, value))
-      parameters
-      (Array.to_list (params func))
+  let named_values = Hashtbl.create (module String) in
+  let generate_named_value name ty =
+    let count =
+      match Hashtbl.find named_values name with
+      | Some (_, c) -> c + 1
+      | None -> 0
+    in
+    let tagged_name = name ^ string_of_int count in
+    let value = build_alloca ty tagged_name builder in
+    Hashtbl.set named_values ~key:name ~data:(value, count);
+    value
   in
-  let arguments =
-    match arguments with
-    | Ok args -> args
-    | Unequal_lengths ->
-        raise
-          (Internal_issue
-             (Printf.sprintf
-                "unequal parameter lengths between function and itself (%s)"
-                (Ast.print_li location)))
+  let argument_codegen (name, ty) value =
+    let ty = get_data_type ty context in
+    let location = generate_named_value name ty in
+    let _ = build_store value location builder in
+    ()
   in
-  let named_values = Hashtbl.of_alist_or_error (module String) arguments in
-  let named_value_error =
-    Printf.sprintf "duplicate parameter name in function %s at (%s)" name
-      (Ast.print_li location)
-  in
-  let named_values =
-    Option.value_exn ~message:named_value_error (Result.ok named_values)
-  in
+  List.iter2_exn ~f:argument_codegen parameters (Array.to_list (params func));
+
   let basic_block_count = ref 1 in
   let generate_basic_block_name =
     let count = !basic_block_count in
@@ -168,11 +173,25 @@ let codegen_fun func context current_mod =
           codegen_expr expr (context, current_mod, builder, named_values)
         in
         ()
-    | Assignment (name, _, expr, _) ->
+    | Assignment (name, ty, expr, reassignment, li) ->
         let value =
           codegen_expr expr (context, current_mod, builder, named_values)
         in
-        Hashtbl.set named_values ~key:name ~data:value
+        let location =
+          if not reassignment then
+            let ty = get_data_type ty context in
+            generate_named_value name ty
+          else
+            let location = Hashtbl.find named_values name in
+            let error =
+              Printf.sprintf "no known variable %s in scope of (%s)" name
+                (Ast.print_li li)
+            in
+            let location, _ = Option.value_exn ~message:error location in
+            location
+        in
+        let _ = build_store value location builder in
+        ()
     | Conditional (expr, body, repeated, _) ->
         let condition_bb =
           append_block context generate_basic_block_name func
@@ -187,13 +206,7 @@ let codegen_fun func context current_mod =
         let condition =
           codegen_expr expr (context, current_mod, builder, named_values)
         in
-        let _ =
-          if repeated then
-            (* If statements and while loops have the opposite taken semantics.
-               This could be fixed in the future by inserting a not in the Ast. *)
-            build_cond_br condition not_taken_bb taken_bb builder
-          else build_cond_br condition taken_bb not_taken_bb builder
-        in
+        let _ = build_cond_br condition taken_bb not_taken_bb builder in
         position_at_end taken_bb builder;
         codegen_code_block body (fun _ _ -> ());
         let _ =
@@ -226,11 +239,11 @@ let codegen_fun func context current_mod =
   in
   codegen_code_block body insert_ret
 
-let generate_code name { Tsr.externs; functions } context =
+let generate_code name { Tsr.externs; functions; aliases } context =
   let _ = (externs, functions) in
   let current_mod = create_module context name in
-  define_void_type context;
   generate_operator_functions context current_mod;
+  List.iter ~f:(fun x -> codegen_alias x context) aliases;
   List.iter ~f:(fun x -> codegen_ext x context current_mod) externs;
   List.iter ~f:(fun x -> codegen_shallow_fun x context current_mod) functions;
   List.iter ~f:(fun x -> codegen_fun x context current_mod) functions;

@@ -15,6 +15,7 @@ depends: [
   "menhir"
   "llvm"
   "core"
+  "ocamlgraph"
   "odoc" {with-doc}
 ]
 build: [

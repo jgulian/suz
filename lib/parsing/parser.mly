@@ -1,5 +1,6 @@
 %{
   open Structure
+  open Core
 %}
 
 %token FUN
@@ -7,23 +8,31 @@
 %token LET
 %token IF
 %token WHILE
+%token TYPE
 %token LBRACK
 %token RBRACK
 %token LPAREN
 %token RPAREN
 %token COLON
 %token SCOLON
+%token PERIOD
 %token COMMA
 %token EQUALS
 %token DEQUALS
+%token NEQUALS
+%token LANGLE
+%token RANGLE
 %token ADD
 %token SUB
+%token MUL
 %token ARROW
+%token ASSIGN
 %token EOF
 
 %token <Structure.Ast.expression> NUM_LITERAL
 %token <string> IDENTIFIER
 %token <Structure.Ast.data_type> NUMERIC_TYPE
+%token <int> INDEX
 
 %type <Structure.Ast.item list> items
 %type <Structure.Ast.item> item
@@ -35,7 +44,8 @@
 %type <Structure.Ast.binary_operation> binary_operation
 %type <Structure.Ast.data_type> data_type
 
-%left ADD SUB DEQUALS (* This might be wrong for DEQUALS *)
+%left ADD SUB DEQUALS NEQUALS LANGLE RANGLE (* This might be wrong for DEQUALS, NEQUALS, LANGLE, RANGLE *)
+%right MUL PERIOD
 
 %start items
 
@@ -50,6 +60,7 @@ item:
     { Ast.Function ({ Ast.Function.name = name; parameters; return_type; body; location = Ast.li $loc; }, Ast.li $loc) }
   | EXT name=IDENTIFIER; LPAREN parameters=separated_list(COMMA, data_type); RPAREN ARROW return_type=data_type; SCOLON 
     { Ast.Extern ({ Ast.Extern.name = name; parameters; return_type; location = Ast.li $loc; }, Ast.li $loc) }
+  | TYPE alias=IDENTIFIER; EQUALS ty=data_type SCOLON { Ast.Type (alias, ty, Ast.li $loc) }
   ;
 
 parameter:
@@ -61,13 +72,14 @@ code_block:
   ;
 
 statements:
-  | expression SCOLON { ([Ast.Expression ($1, Ast.li $loc)], None) } 
+  | statement { ([$1], None) } 
   | expression { ([], Some $1) }
   | statement statements { let (lst, expr) = $2 in $1 :: lst, expr }
 
 %inline statement:
   | LET IDENTIFIER COLON data_type EQUALS expression SCOLON { Ast.Assignment ($2, $4, $6, Ast.li $loc) }
   | expression SCOLON { Ast.Expression ($1, Ast.li $loc) }
+  | var=IDENTIFIER; ASSIGN value=expression; SCOLON { Ast.Reassignment (var, value, Ast.li $loc) }
   | IF condition=expression; body=code_block { Ast.If (condition, body, Ast.li $loc)  }
   | WHILE condition=expression; body=code_block { Ast.While (condition, body, Ast.li $loc) }
   ;
@@ -76,18 +88,24 @@ expression:
   | expression binary_operation expression { Binary ($1, $3, $2, Ast.li $loc) }
   | IDENTIFIER LPAREN separated_list(COMMA, expression) RPAREN { Call ($1, $3, Ast.li $loc) }
   | LPAREN expression RPAREN { $2 }
+  | expr=expression PERIOD index=INDEX { Ast.TupleAccess (expr, index, Ast.li $loc) }
   | IDENTIFIER { Variable ($1, Ast.li $loc) }
   | NUM_LITERAL { $1 }
-  | LPAREN RPAREN { VoidData (Ast.li $loc) }
   ;
 
 %inline binary_operation:
+  | DEQUALS { Ast.Equals (Ast.li $loc) }
+  | NEQUALS { Ast.NotEquals (Ast.li $loc) }
+  | LANGLE { Ast.Less (Ast.li $loc) }
+  | RANGLE { Ast.Greater (Ast.li $loc) }
   | ADD { Ast.Add (Ast.li $loc) }
   | SUB { Ast.Sub (Ast.li $loc) }
-  | DEQUALS { Ast.Equals (Ast.li $loc) }
+  | MUL { Ast.Mul (Ast.li $loc) }
   ;
 
 data_type:
-  | LPAREN RPAREN { Ast.Void (Ast.li $loc) }
   | NUMERIC_TYPE { $1 }
+  | LPAREN factors=separated_list(COMMA, data_type) RPAREN 
+    { if List.is_empty factors then Ast.Void (Ast.li $loc) else Ast.Tuple (factors, Ast.li $loc) }
+  | name=IDENTIFIER { Ast.Named (name, Ast.li $loc) }
   ;
