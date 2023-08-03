@@ -11,7 +11,7 @@
       } 
 
   let li lexbuf = 
-    Ast.li (lexbuf.lex_start_p, lexbuf.lex_curr_p)
+    General.li (lexbuf.lex_start_p, lexbuf.lex_curr_p)
 
 }
 
@@ -40,11 +40,14 @@ rule token = parse
   | "}"      { RBRACK }
   | "("      { LPAREN }
   | ")"      { RPAREN }
+  | "["      { LBLOCK }
+  | "]"      { RBLOCK }
   | ":"      { COLON }
   | ";"      { SCOLON }
   | "."      { PERIOD }
   | ","      { COMMA }
   | "!"      { EXCLAMATION }
+  | "&"      { AMPERSAND }
   | "="      { EQUALS }
   | "=="     { DEQUALS }
   | "!="     { NEQUALS }

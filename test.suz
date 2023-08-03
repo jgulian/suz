@@ -1,18 +1,116 @@
+ext read_u8() -> u8;
 ext read_usize() -> usize;
 ext read_isize() -> isize;
 ext read_fsize() -> fsize;
 
+ext print_u8(u8) -> ();
 ext print_usize(usize) -> ();
 ext print_isize(isize) -> ();
 ext print_fsize(fsize) -> ();
 
 ext newline() -> ();
 
+ext alloc(usize) -> *u8;
+ext dealloc(*u8, usize) -> ();
+
 type A = (B, B);
 type B = fsize;
 type C = A;
 
 fun main() -> () {
+    test_duplicate();
+}
+
+fun test_duplicate() -> () {
+    let a: usize = 4_usize;
+    test_duplicate_inner(a);
+    print_usize(a);
+    test_non_duplicate_inner(a);
+    print_usize(a);
+}
+
+fun test_duplicate_inner(a: usize) -> () {
+    a := 8_usize;
+}
+
+fun test_non_duplicate_inner(a: &usize) -> () {
+    a := 16_usize;
+}
+
+fun read_arbitrary_size_string() -> () {
+    let s: (*u8, usize, usize) = new_string();
+
+    let good: usize = 0_usize;
+    while good == 0_usize {
+        let c: u8 = read_u8();
+        if c == 10_u8 {
+            good := 1_usize;
+        }
+        s := push(s, c);
+    }
+
+    print_string(s);
+}
+
+fun new_string() -> (*u8, usize, usize) {
+    (alloc(10_usize), 0_usize, 10_usize)
+}
+
+fun push(s: (*u8, usize, usize), c: u8) -> (*u8, usize, usize) {
+    if s.1 == s.2 {
+        let new_size: usize = 2_usize * s.2;
+        let new_alloc: *u8 = alloc(new_size);
+        let i: usize = 0_usize;
+        while i < s.2 {
+            new_alloc[i] := s.0[i];
+            i := i + 1_usize;
+        }
+        s := (new_alloc, s.1, new_size);
+    }
+
+    s.0[s.1] := c;
+    s.1 := s.1 + 1_usize;
+    s
+}
+
+fun print_string(s: (*u8, usize, usize)) -> () {
+    let i: usize = 0_usize;
+    while (i < s.1) {
+        print_u8(s.0[i]);
+        i := i + 1_usize;
+    }
+}
+
+fun test_echo_ten() -> () {
+    let a: *u8 = alloc(10_usize);
+
+    let i: usize = 0_usize;
+    while (i < 10_usize) {
+        a[i] := read_u8();
+        i := i + 1_usize;
+    }
+
+    i := 0_usize;
+    while (i < 10_usize) {
+        print_u8(a[i]);
+        i := i + 1_usize;
+    }
+
+    newline();
+}
+
+fun test_pass_pointer () -> () {
+    let a: *u8 = alloc_and_read();
+    print_u8(a!)
+}
+
+fun alloc_and_read() -> *u8 {
+    let a: *u8 = alloc(1_usize);
+    a! := read_u8();
+    a
+}
+
+fun test_tuple_io() -> () {
     let a: usize = read_usize();
     let b: isize = read_isize();
     let c: fsize = read_fsize();

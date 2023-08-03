@@ -1,7 +1,5 @@
 open Core
-
-type location_information = Ast.location_information
-and numeric_format = Ast.numeric_format
+open General
 
 type data_type =
   | Void
@@ -11,10 +9,10 @@ type data_type =
   | Pointer of data_type
   | Named of string * data_type
 
-  let op_return_type op ty =
-    match op with
-    | Ast.Add _ | Sub _ | Mul _ -> ty
-    | Equals _ | NotEquals _ | Less _ | Greater _ -> Bool
+let op_return_type op ty =
+  match op with
+  | Ast.Add _ | Sub _ | Mul _ -> ty
+  | Equals _ | NotEquals _ | Less _ | Greater _ -> Bool
 
 module DataType = struct
   type t = data_type
@@ -28,7 +26,7 @@ module DataType = struct
     | Bool, _ -> 1
     | _, Bool -> -1
     | Numeric (a, a_s), Numeric (b, b_s) ->
-        let f_comp = Ast.compare_numeric_format a b in
+        let f_comp = compare_numeric_format a b in
         if f_comp = 0 then a_s - b_s else f_comp
     | Numeric _, _ -> 1
     | _, Numeric _ -> -1
@@ -86,42 +84,47 @@ let rec find_tuples dt =
   | Named (_, a) -> find_tuples a
   | _ -> []
 
+type unary_operation = Not
+
 type expression =
   | Literal of float * data_type * location_information
   | Variable of string * data_type * location_information
   | Call of string * expression list * data_type * location_information
-  | Binary of expression * expression * Ast.binary_operation * location_information
-  | TupleConstruction of string * expression list * location_information
+  | Unary of expression * unary_operation * data_type * location_information
+  | Binary of
+      expression
+      * expression
+      * Ast.binary_operation
+      * data_type
+      * location_information
+  | TupleConstruction of expression list * data_type * location_information
   | TupleAccess of expression * int * data_type * location_information
-  | IndexDeref of expression * int * location_information
+  | IndexDeref of expression * expression * data_type * location_information
 
-let rec expr_type expr =
+type location =
+  | Access of int * location_information
+  | Deref of expression * location_information
+
+let expr_type expr =
   match expr with
   | Literal (_, dt, _) -> dt
   | Variable (_, dt, _) -> dt
   | Call (_, _, dt, _) -> dt
-  | Binary (lhs, _, op, _) -> op_return_type op (expr_type lhs)
-  | TupleConstruction (_, factors, _) -> Tuple (List.map ~f:expr_type factors)
-  | TupleAccess (_, index, dt, li) -> 
-    begin
-      match dt with 
-      | Tuple factor_tys -> begin 
-      match List.nth factor_tys index  with 
-       | Some dt -> dt
-       | None -> raise (Syntax_error (Printf.sprintf "tuple access out of bounds (%s)" (Ast.print_li li)))
-      end
-      | _ -> raise (Type_error (Printf.sprintf "can only access tuples (%s)" (Ast.print_li li)))
-    end
-  | IndexDeref (expr, _, li) -> let ty = expr_type expr in 
-  begin
-    match ty with 
-      | Pointer ty -> ty 
-      | _ -> raise (Type_error (Printf.sprintf "can only dereference pointers (%s)" (Ast.print_li li)))
-  end
+  | Unary (_, _, dt, _) -> dt
+  | Binary (_, _, _, dt, _) -> dt
+  | TupleConstruction (_, dt, _) -> dt
+  | TupleAccess (_, _, dt, _) -> dt
+  | IndexDeref (_, _, dt, _) -> dt
 
 type statement =
   | Expression of expression * location_information
-  | Assignment of string * data_type * expression * bool * location_information
+  | Assignment of
+      string
+      * location list
+      * data_type
+      * expression
+      * bool
+      * location_information
   | Conditional of expression * code_block * bool * location_information
 
 and code_block = statement list * expression option * location_information
@@ -139,7 +142,7 @@ module Function = struct
   type t = {
     name : string;
     return_type : data_type;
-    parameters : (string * data_type) list;
+    parameters : (string * bool * data_type) list;
     body : code_block;
     location : location_information;
   }
@@ -149,100 +152,4 @@ type build_module = {
   externs : Extern.t list;
   functions : Function.t list;
   aliases : (string * data_type) list;
-  used_types : data_type list;
 }
-
-let rec print_dt dt =
-  match dt with
-  | Void -> "Void"
-  | Bool -> "Bool"
-  | Numeric (a, s) -> Printf.sprintf "Numeric (%s, %d)" (Ast.print_nf a) s
-  | Tuple factors ->
-      let factors = String.concat ~sep:", " (List.map ~f:print_dt factors) in
-      Printf.sprintf "Numeric (%s)" factors
-  | Pointer i -> Printf.sprintf "Pointer (%s)" (print_dt i)
-  | Named (name, dt) -> Printf.sprintf "Named (%s, %s)" name (print_dt dt)
-
-let debug_print { externs; functions; aliases; used_types } =
-  let print_ext { Extern.name; return_type; parameters; location } =
-    let parameters =
-      String.concat ~sep:", " (List.map ~f:print_dt parameters)
-    in
-    Printf.sprintf "Extern (%s, %s, %s, (%s))" name (print_dt return_type)
-      parameters (Ast.print_li location)
-  in
-  let rec print_expr expr i =
-    match expr with
-    | Literal (v, dt, li) ->
-        Printf.sprintf "Literal %f, %s, (%s)" v (print_dt dt) (Ast.print_li li)
-    | Variable (name, dt, li) ->
-        Printf.sprintf "Variable %s, %s, (%s)" name (print_dt dt)
-          (Ast.print_li li)
-    | Call (func, args, dt, li) ->
-        let tabs = Ast.nt i in
-        let args =
-          String.concat ~sep:(",\n\t" ^ tabs)
-            (List.map ~f:(fun x -> print_expr x (i + 1)) args)
-        in
-        Printf.sprintf "Call %s, %s, (\n%s\t%s\n%s), (%s)" func (print_dt dt)
-          tabs args tabs (Ast.print_li li)
-    | Binary _ -> raise Unimplemented
-    | TupleConstruction _ -> raise Unimplemented
-    | TupleAccess _ -> raise Unimplemented
-    | IndexDeref _ -> raise Unimplemented
-  in
-  let rec print_stmt stmt i =
-    match stmt with
-    | Expression (expr, li) ->
-        Printf.sprintf "Expression %s (%s)" (print_expr expr i)
-          (Ast.print_li li)
-    | Assignment (var, dt, expr, reassignment, li) ->
-        let tabs = Ast.nt i in
-        Printf.sprintf "Assignment %s, %s, %b, (%s), \n%s%s" var (print_dt dt)
-          reassignment (Ast.print_li li) tabs
-          (print_expr expr (i + 1))
-    | Conditional (expr, body, repeated, li) ->
-        let tabs = Ast.nt i in
-        Printf.sprintf
-          "Condition {\n\
-           %sCondition: %s\n\
-           %sBody: %s\n\
-           %sRepeated: %b\n\
-           %sLocationInfo: (%s) }" tabs
-          (print_expr expr (i + 1))
-          tabs
-          (print_cb body (i + 1))
-          tabs repeated tabs (Ast.print_li li)
-  and print_cb (stmts, final_expr, li) i =
-    let tabs = Ast.nt i in
-    let body =
-      String.concat ~sep:(",\n\t" ^ tabs)
-        (List.map ~f:(fun x -> print_stmt x (i + 1)) stmts)
-    in
-    let final_expr =
-      Option.value ~default:"None"
-        (Option.map ~f:(fun x -> print_expr x (i + 1)) final_expr)
-    in
-    let body = body ^ "\n\t" ^ tabs ^ final_expr in
-    Printf.sprintf "CodeBlock (%s), \n%s%s" (Ast.print_li li) tabs body
-  in
-  let print_func { Function.name; return_type; parameters; body; location } i =
-    let tabs = Ast.nt i in
-    let parameters =
-      String.concat ~sep:", "
-        (List.map ~f:(fun (n, dt) -> n ^ ": " ^ print_dt dt) parameters)
-    in
-    Printf.sprintf "Function %s, %s, %s, (%s), \n\t%s" name
-      (print_dt return_type) parameters (Ast.print_li location)
-      (tabs ^ print_cb body (i + 1))
-  in
-  let externs = String.concat ~sep:"\n" (List.map ~f:print_ext externs) in
-  let functions =
-    String.concat ~sep:"\n" (List.map ~f:(fun f -> print_func f 0) functions)
-  in
-  let print_alias (name, alias) =
-    Printf.sprintf "Alias %s = (%s)" name (print_dt alias)
-  in
-  let aliases = String.concat ~sep:"\n" (List.map ~f:print_alias aliases) in
-  let used_types = List.map ~f:print_dt used_types |> String.concat ~sep:"\n" in
-  externs ^ "\n" ^ functions ^ "\n" ^ aliases ^ "\n" ^ used_types

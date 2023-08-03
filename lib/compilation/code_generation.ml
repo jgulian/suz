@@ -2,47 +2,119 @@ open Structure
 open Llvm
 open Tsr
 open Core
-open Operators
 open Data_type
+open Operators
+open General
 
-let rec codegen_expr expr build_context =
+let rec codegen_expr build_context expr =
+  let codegen_expr_r = codegen_expr build_context in
   let context, current_mod, builder, named_values = build_context in
   let get_data_type_c = get_data_type context in
   match expr with
   | Literal (v, dt, li) -> (
       match dt with
       | Numeric (format, _) -> (
-          match format with
-          | Floating -> const_float (get_data_type_c dt) v
-          | Signed | Unsigned -> const_int (get_data_type_c dt) (int_of_float v)
-          )
+        let ty = get_data_type_c dt in
+          let location = build_alloca ty "" builder in
+          let _ = match format with
+          | Floating -> (const_float ty v |> build_store) location builder
+          | Signed | Unsigned -> (const_int ty (int_of_float v) |> build_store) location builder
+        in
+        location
+          ) 
       | _ ->
           raise
             (Unexpected_type
                (Printf.sprintf "unexpected type of literal at (%s)"
-                  (Ast.print_li li))))
+                  (print_li li))))
   | Variable (name, _, li) ->
       let error =
         Printf.sprintf "unknown variable reference %s at (%s)" name
-          (Ast.print_li li)
+          (print_li li)
       in
       let pointer = Hashtbl.find named_values name in
       let pointer, _ = Option.value_exn ~message:error pointer in
-      build_load pointer "" builder
-  | Call (function_name, args, _, li) ->
+      pointer
+  | Unary (expr, op, _, _) -> 
+    let expr = codegen_expr_r expr in 
+    print_endline "here 1";
+    let expr = build_load expr "" builder in
+    print_endline "here 2";
+    begin
+      match op with 
+      | Not -> build_not expr "" builder
+    end
+  | Call (function_name, args, dt, li) ->
       let func_error =
         Printf.sprintf "unknown function reference %s at (%s)" function_name
-          (Ast.print_li li)
+          (print_li li)
       in
       let func =
         Option.value_exn ~message:func_error
           (lookup_function function_name current_mod)
       in
-      let codegen_expr_map x =
-        codegen_expr x (context, current_mod, builder, named_values)
+      let map_arg arg ty = 
+        match classify_type ty with 
+          | Pointer -> codegen_expr_r arg
+          | _ -> (codegen_expr_r arg |> build_load) "" builder
       in
-      let args = Array.of_list (List.map ~f:codegen_expr_map args) in
-      build_call func args "" builder
+      let args = List.map2 ~f:map_arg args (type_of func|> return_type  |> param_types |> Array.to_list) in
+      let args = match args with 
+        | Ok args -> args 
+        | _ -> 
+          raise (Internal_issue ("function parameters and args of unequal length at " ^ (print_li li)))
+    in
+      let value = build_call func (Array.of_list args) "" builder in 
+      begin
+        match dt with 
+        | Void -> value
+        | _ -> let ty = get_data_type_c dt in 
+        let location = build_alloca ty "" builder in 
+        let _ = build_store value location builder in 
+        location 
+      end
+  | Binary (lhs, rhs, op, dt, _) ->
+      let ty = expr_type lhs in
+      let lhs = codegen_expr_r lhs in
+      print_endline "here 3";
+      let lhs = build_load lhs "" builder in print_endline "here 4";
+      let rhs = codegen_expr_r rhs in
+      let rhs = build_load rhs "" builder in print_endline "here 5";
+      let value = (codegen_binary_instruction op ty) lhs rhs "" builder in 
+      let ty = get_data_type_c dt in
+      let location = build_alloca ty "" builder in 
+      let _ = build_store value location builder in 
+      location
+  | TupleConstruction (factors, _, _) ->
+      let factors = List.map ~f:codegen_expr_r factors in
+      let factors = List.map ~f:(fun x -> build_load x "" builder) factors in
+      let factor_tys = List.map ~f:type_of factors |> Array.of_list in
+      let ty = struct_type context factor_tys in
+      let location = build_alloca ty "" builder in
+      let store_factor index factor =
+        print_endline "gere 1";
+        let pointer = build_struct_gep location index "" builder in
+        string_of_llvalue pointer |> (^) "TupleConstruction " |> print_endline;
+        print_endline "gere 2";
+        let _ = build_store factor pointer builder in
+        index + 1
+      in
+      let _ = List.fold factors ~init:0 ~f:store_factor in
+      location
+  | TupleAccess (expr, index, _, _) ->
+      let location = codegen_expr_r expr in
+      print_endline "gere 3";
+      let r = build_struct_gep location index "" builder in 
+      string_of_llvalue r |> (^) "TupleAccess " |> print_endline;
+      print_endline "gere 4"; r
+  | IndexDeref (expr, index, _, _) ->
+      let expr = codegen_expr_r expr in
+      let index = codegen_expr_r index in
+      let index = build_load index "" builder in 
+      print_endline "gere 5";
+      let r = build_gep expr (Array.of_list [ index ]) "" builder in 
+      string_of_llvalue r |> (^) "IndexDeref " |> print_endline;
+      print_endline "gere 6"; build_load r "" builder
 
 let codegen_alias (name, alias) context =
   let ty = named_struct_type context name in
@@ -51,8 +123,10 @@ let codegen_alias (name, alias) context =
 
 let codegen_shallow_fun { Tsr.Function.name; return_type; parameters; _ }
     context current_mod =
-  let map_data_type (_, dt) = get_data_type context dt in
-  let return_type = map_data_type ((), return_type) in
+    let map_data_type (_, ref, dt) = 
+      let ty = get_data_type context dt in
+      if ref then pointer_type ty else ty in
+  let return_type = get_data_type context return_type in
   let parameters = Array.of_list (List.map ~f:map_data_type parameters) in
   let function_ty = function_type return_type parameters in
   let _ = define_function name function_ty current_mod in
@@ -68,27 +142,65 @@ let codegen_ext { Tsr.Extern.name; return_type; parameters; _ } context
   let func = declare_function name function_ty current_mod in
   set_linkage Linkage.External func
 
+let resolve_location build_context source path li =
+  let _, _, builder, named_values = build_context in
+  let location = Hashtbl.find named_values source in
+  let error =
+    Printf.sprintf "no known variable %s in scope of (%s)" source (print_li li)
+  in
+  let location, _ = Option.value_exn ~message:error location in
+  let map_location value action =
+    match action with
+    | Access (i, _) ->
+      print_endline "gere 7";
+        let r = build_struct_gep value i "" builder in print_endline "gere 8"; 
+        string_of_llvalue r |> (^) "Access " |> print_endline;
+        r
+    | Deref (i, _) ->
+      print_endline "here 6";
+        let value = build_load value "" builder in 
+        print_endline "here 7";
+        let value_storage = build_alloca (type_of value) "" builder in
+        let _ = build_store value value_storage builder in
+        let value = value_storage in
+        let value = build_load value "" builder in
+        print_endline "here 8";
+        let indices = Array.of_list [ codegen_expr build_context i ] in
+        let indices = Array.map ~f:(fun x -> build_load x "" builder) indices in 
+        print_endline "gere 9";
+        let r = build_gep value indices "" builder in print_endline "gere 10"; 
+        string_of_llvalue r |> (^) "Deref " |> print_endline;
+        r
+  in
+  if List.is_empty path then location
+  else List.fold ~init:location ~f:map_location path
+
 let codegen_fun func context current_mod =
   let { Tsr.Function.name; parameters; body; _ } = func in
   let func = Option.value_exn (lookup_function name current_mod) in
   let builder = builder_at_end context (entry_block func) in
   let named_values = Hashtbl.create (module String) in
-  let generate_named_value name ty =
+  let generate_named_value name ref ty =
     let count =
       match Hashtbl.find named_values name with
       | Some (_, c) -> c + 1
       | None -> 0
     in
     let tagged_name = name ^ string_of_int count in
-    let value = build_alloca ty tagged_name builder in
-    Hashtbl.set named_values ~key:name ~data:(value, count);
-    value
+    match ref with 
+      | Some value -> 
+        Hashtbl.set named_values ~key:name ~data:(value, count);
+        value
+      | None ->
+        let value = build_alloca ty tagged_name builder in
+        Hashtbl.set named_values ~key:name ~data:(value, count);
+        value
   in
-  let argument_codegen (name, ty) value =
+  let argument_codegen (name, ref, ty) value =
     let ty = get_data_type context ty in
-    let location = generate_named_value name ty in
-    let _ = build_store value location builder in
-    ()
+    let ref = if ref then Some value else None in 
+    let location = generate_named_value name ref ty in 
+    if Option.is_none ref then let _ = build_store value location builder in () else ()
   in
   List.iter2_exn ~f:argument_codegen parameters (Array.to_list (params func));
 
@@ -102,28 +214,26 @@ let codegen_fun func context current_mod =
     match stmt with
     | Expression (expr, _) ->
         let _ =
-          codegen_expr expr (context, current_mod, builder, named_values)
+          codegen_expr (context, current_mod, builder, named_values) expr
         in
         ()
-    | Assignment (name, ty, expr, reassignment, li) ->
+    | Assignment (name, path, ty, expr, reassignment, li) ->
         let value =
-          codegen_expr expr (context, current_mod, builder, named_values)
+          codegen_expr (context, current_mod, builder, named_values) expr
         in
         let location =
           if not reassignment then
             let ty = get_data_type context ty in
-            generate_named_value name ty
+            generate_named_value name None ty
           else
-            let location = Hashtbl.find named_values name in
-            let error =
-              Printf.sprintf "no known variable %s in scope of (%s)" name
-                (Ast.print_li li)
-            in
-            let location, _ = Option.value_exn ~message:error location in
-            location
+            resolve_location
+              (context, current_mod, builder, named_values)
+              name path li
         in
-        let _ = build_store value location builder in
-        ()
+        print_endline ("here 9 " ^ (string_of_llvalue value) ^ " " ^ (type_of value |> string_of_lltype));
+        let value = build_load value "" builder in 
+        print_endline "here 10";
+        let s = build_store value location builder in print_endline ("Assignment" ^ (string_of_llvalue s));
     | Conditional (expr, body, repeated, _) ->
         let condition_bb =
           append_block context generate_basic_block_name func
@@ -136,8 +246,9 @@ let codegen_fun func context current_mod =
         position_at_end condition_bb builder;
         (* should typecheck it's a bool during lowering *)
         let condition =
-          codegen_expr expr (context, current_mod, builder, named_values)
+          codegen_expr (context, current_mod, builder, named_values) expr
         in
+        let condition = build_load condition "" builder in 
         let _ = build_cond_br condition taken_bb not_taken_bb builder in
         position_at_end taken_bb builder;
         codegen_code_block body (fun _ _ -> ());
@@ -151,7 +262,7 @@ let codegen_fun func context current_mod =
     let final_value =
       Option.map
         ~f:(fun x ->
-          codegen_expr x (context, current_mod, builder, named_values))
+          codegen_expr (context, current_mod, builder, named_values) x)
         final_expr
     in
     f final_value final_expr
@@ -161,22 +272,19 @@ let codegen_fun func context current_mod =
       match Option.value ~default:Void (Option.map ~f:expr_type expr) with
       | Void -> build_ret_void builder
       | _ ->
-          build_ret
-            (Option.value_exn
-               ~message:"internal error value final expr not same optional"
-               value)
-            builder
+        let value = Option.value_exn
+        ~message:"internal error value final expr not same optional"
+        value in 
+        let value = build_load value "" builder in 
+        build_ret value builder
     in
     ()
   in
   codegen_code_block body insert_ret
 
-let generate_code name { Tsr.externs; functions; aliases; used_types } context =
+let generate_code name { Tsr.externs; functions; aliases } context =
   let _ = (externs, functions) in
   let current_mod = create_module context name in
-  generate_operator_functions context current_mod;
-  let codegen_used_type_ctx = codegen_used_type context current_mod in
-  List.iter ~f:codegen_used_type_ctx used_types;
   List.iter ~f:(fun x -> codegen_alias x context) aliases;
   List.iter ~f:(fun x -> codegen_ext x context current_mod) externs;
   List.iter ~f:(fun x -> codegen_shallow_fun x context current_mod) functions;

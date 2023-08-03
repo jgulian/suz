@@ -1,5 +1,10 @@
 #include "stdio.h"
 #include "stddef.h"
+#include "stdlib.h"
+
+uint8_t read_u8(void) {
+  return getchar();
+}
 
 uintptr_t read_usize(void) {
   uintptr_t x;
@@ -19,6 +24,10 @@ double read_fsize(void) {
   return x;
 }
 
+void print_u8(uint8_t data) {
+  putchar(data);
+}
+
 void print_usize(uintptr_t data) {
   printf("%lu\n", data);
 }
@@ -33,4 +42,12 @@ void print_fsize(double data) {
 
 void newline(void) {
   puts("");
+}
+
+u_int8_t* alloc(uintptr_t size) {
+  return malloc(size);
+}
+
+void dealloc(u_int8_t* ptr, uintptr_t size) {
+  return free(ptr);
 }

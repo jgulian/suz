@@ -1,4 +1,5 @@
 open Core
+open General
 
 type environment = {
   function_types : (string, Tsr.data_type) Hashtbl.t;
@@ -24,7 +25,7 @@ let rec map_data_type env dt =
   | Ast.Pointer (inner, _) -> Tsr.Pointer (map_data_type env inner)
   | Ast.Named (name, li) ->
       let error =
-        Printf.sprintf "no type alias %s in scope %s" name (Ast.print_li li)
+        Printf.sprintf "no type alias %s in scope %s" name (print_li li)
       in
       Tsr.Named
         (name, Option.value_exn ~message:error (Hashtbl.find env.aliases name))

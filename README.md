@@ -10,7 +10,8 @@ The Tsr is then lowered to llvm ir which is compiled to the binary using clang.
 Because of this, beyond the requirements presented, it also requires clang be 
 present on the system.
 
-Below is an example of the syntax.
+Below is an example of the syntax. 
+A lot more syntax can be found in the `test.suz` file.
 
 ```
 ext read_int() -> usize;
