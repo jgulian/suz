@@ -19,10 +19,9 @@ let non_zero = ['1'-'9']
 let digit = ['0'-'9']
 let alpha = ['a'-'z' 'A'-'Z']
 
-let numeric_type = ('f' | 'u' | 'i') ("size")
-(* '8' | "16" | "32" | "64" |  *)
+let numeric_type = ('f' ("size" | "32" | "64")) | (('u' | 'i') ("size" | '8' | "16" | "32" | "64"))
 
-let index = non_zero digit*
+let index = (non_zero digit*) | '0'
 let int_constant = '-'? digit+ '_' numeric_type
 let float_constant = '-'? digit+ '.' digit+ '_' numeric_type
 let identifier = alpha (alpha | digit | '_')*
@@ -45,6 +44,7 @@ rule token = parse
   | ";"      { SCOLON }
   | "."      { PERIOD }
   | ","      { COMMA }
+  | "!"      { EXCLAMATION }
   | "="      { EQUALS }
   | "=="     { DEQUALS }
   | "!="     { NEQUALS }

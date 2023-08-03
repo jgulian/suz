@@ -3,22 +3,18 @@ open Core
 type location_information = Ast.location_information
 and numeric_format = Ast.numeric_format
 
-let compare_numeric_format a b =
-  match (a, b) with
-  | Ast.Floating, Ast.Floating -> 0
-  | _, Ast.Floating -> -1
-  | Ast.Floating, _ -> 1
-  | Ast.Signed, Ast.Signed -> 0
-  | _, Ast.Signed -> -1
-  | Ast.Signed, _ -> 1
-  | Ast.Unsigned, Ast.Unsigned -> 0
-
 type data_type =
   | Void
   | Bool
-  | Numeric of numeric_format
+  | Numeric of numeric_format * int
   | Tuple of data_type list
+  | Pointer of data_type
   | Named of string * data_type
+
+  let op_return_type op ty =
+    match op with
+    | Ast.Add _ | Sub _ | Mul _ -> ty
+    | Equals _ | NotEquals _ | Less _ | Greater _ -> Bool
 
 module DataType = struct
   type t = data_type
@@ -31,7 +27,9 @@ module DataType = struct
     | Bool, Bool -> 0
     | Bool, _ -> 1
     | _, Bool -> -1
-    | Numeric a, Numeric b -> compare_numeric_format a b
+    | Numeric (a, a_s), Numeric (b, b_s) ->
+        let f_comp = Ast.compare_numeric_format a b in
+        if f_comp = 0 then a_s - b_s else f_comp
     | Numeric _, _ -> 1
     | _, Numeric _ -> -1
     | Tuple a, Tuple b ->
@@ -44,56 +42,82 @@ module DataType = struct
           List.nth li 0 |> Option.value ~default:0
     | Tuple _, _ -> 1
     | _, Tuple _ -> -1
+    | Pointer a, Pointer b -> compare a b
+    | Pointer _, _ -> 1
+    | _, Pointer _ -> -1
     | Named (a_n, a_dt), Named (b_n, b_dt) ->
         let name_compare = String.compare a_n b_n in
         if name_compare = 0 then compare a_dt b_dt else name_compare
 
   let rec sexp_of_t a =
-    match a with 
-      | Void -> Sexp.Atom "Void"
-      | Bool -> Sexp.Atom "Bool"
-      | Numeric format ->
-        (match format with 
-          | Floating -> Sexp.Atom "Floating"
-          | Signed -> Sexp.Atom "Signed"
-          | Unsigned -> Sexp.Atom "Unsigned")
-      | Tuple li -> List.sexp_of_t sexp_of_t li
-      | Named (name, alias) -> Sexp.List [Sexp.Atom name; sexp_of_t alias]
+    match a with
+    | Void -> Sexp.Atom "Void"
+    | Bool -> Sexp.Atom "Bool"
+    | Numeric (format, size) -> (
+        let size = string_of_int size in
+        match format with
+        | Floating -> Sexp.Atom ("Floating" ^ size)
+        | Signed -> Sexp.Atom ("Signed" ^ size)
+        | Unsigned -> Sexp.Atom ("Unsigned" ^ size))
+    | Tuple li -> List.sexp_of_t sexp_of_t li
+    | Pointer a -> Sexp.List [ Sexp.Atom "Pointer"; sexp_of_t a ]
+    | Named (name, alias) ->
+        Sexp.List [ Sexp.Atom "Named"; Sexp.Atom name; sexp_of_t alias ]
 
-  let hash a = 
-    sexp_of_t a |> Sexp.hash 
+  let hash a = sexp_of_t a |> Sexp.hash
 end
 
-let equal_data_type a b =
-  match (a, b) with
-  | Void, Void -> true
-  | Numeric a, Numeric b -> (
-      match (a, b) with
-      | Floating, Floating -> true
-      | Signed, Signed -> true
-      | Unsigned, Unsigned -> true
-      | _ -> false)
-  | _ -> false
+let equal_data_type a b = DataType.compare a b |> ( = ) 0
 
 let rec name_data_type a =
   match a with
   | Void -> "_void"
   | Bool -> "_bool"
-  | Numeric a -> (
-      match a with Floating -> "_f" | Signed -> "_s" | Unsigned -> "_u")
+  | Numeric (a, s) ->
+      let s = string_of_int (s * 8) in
+      (match a with Floating -> "_f" | Signed -> "_s" | Unsigned -> "_u") ^ s
   | Tuple f -> "_tuple" ^ String.concat ~sep:"_" (List.map ~f:name_data_type f)
+  | Pointer i -> "_pointer" ^ name_data_type i
   | Named (n, _) -> n
+
+let rec find_tuples dt =
+  match dt with
+  | Tuple f -> List.cons (Tuple f) (List.map ~f:find_tuples f |> List.concat)
+  | Named (_, a) -> find_tuples a
+  | _ -> []
 
 type expression =
   | Literal of float * data_type * location_information
   | Variable of string * data_type * location_information
   | Call of string * expression list * data_type * location_information
+  | Binary of expression * expression * Ast.binary_operation * location_information
+  | TupleConstruction of string * expression list * location_information
+  | TupleAccess of expression * int * data_type * location_information
+  | IndexDeref of expression * int * location_information
 
-let expr_type expr =
+let rec expr_type expr =
   match expr with
   | Literal (_, dt, _) -> dt
   | Variable (_, dt, _) -> dt
   | Call (_, _, dt, _) -> dt
+  | Binary (lhs, _, op, _) -> op_return_type op (expr_type lhs)
+  | TupleConstruction (_, factors, _) -> Tuple (List.map ~f:expr_type factors)
+  | TupleAccess (_, index, dt, li) -> 
+    begin
+      match dt with 
+      | Tuple factor_tys -> begin 
+      match List.nth factor_tys index  with 
+       | Some dt -> dt
+       | None -> raise (Syntax_error (Printf.sprintf "tuple access out of bounds (%s)" (Ast.print_li li)))
+      end
+      | _ -> raise (Type_error (Printf.sprintf "can only access tuples (%s)" (Ast.print_li li)))
+    end
+  | IndexDeref (expr, _, li) -> let ty = expr_type expr in 
+  begin
+    match ty with 
+      | Pointer ty -> ty 
+      | _ -> raise (Type_error (Printf.sprintf "can only dereference pointers (%s)" (Ast.print_li li)))
+  end
 
 type statement =
   | Expression of expression * location_information
@@ -125,19 +149,21 @@ type build_module = {
   externs : Extern.t list;
   functions : Function.t list;
   aliases : (string * data_type) list;
+  used_types : data_type list;
 }
 
-let debug_print { externs; functions; aliases } =
-  let rec print_dt dt =
-    match dt with
-    | Void -> "Void"
-    | Bool -> "Bool"
-    | Numeric a -> Printf.sprintf "Numeric (%s)" (Ast.print_nf a)
-    | Tuple factors ->
-        let factors = String.concat ~sep:", " (List.map ~f:print_dt factors) in
-        Printf.sprintf "Numeric (%s)" factors
-    | Named (name, dt) -> Printf.sprintf "Named (%s, %s)" name (print_dt dt)
-  in
+let rec print_dt dt =
+  match dt with
+  | Void -> "Void"
+  | Bool -> "Bool"
+  | Numeric (a, s) -> Printf.sprintf "Numeric (%s, %d)" (Ast.print_nf a) s
+  | Tuple factors ->
+      let factors = String.concat ~sep:", " (List.map ~f:print_dt factors) in
+      Printf.sprintf "Numeric (%s)" factors
+  | Pointer i -> Printf.sprintf "Pointer (%s)" (print_dt i)
+  | Named (name, dt) -> Printf.sprintf "Named (%s, %s)" name (print_dt dt)
+
+let debug_print { externs; functions; aliases; used_types } =
   let print_ext { Extern.name; return_type; parameters; location } =
     let parameters =
       String.concat ~sep:", " (List.map ~f:print_dt parameters)
@@ -160,6 +186,10 @@ let debug_print { externs; functions; aliases } =
         in
         Printf.sprintf "Call %s, %s, (\n%s\t%s\n%s), (%s)" func (print_dt dt)
           tabs args tabs (Ast.print_li li)
+    | Binary _ -> raise Unimplemented
+    | TupleConstruction _ -> raise Unimplemented
+    | TupleAccess _ -> raise Unimplemented
+    | IndexDeref _ -> raise Unimplemented
   in
   let rec print_stmt stmt i =
     match stmt with
@@ -214,4 +244,5 @@ let debug_print { externs; functions; aliases } =
     Printf.sprintf "Alias %s = (%s)" name (print_dt alias)
   in
   let aliases = String.concat ~sep:"\n" (List.map ~f:print_alias aliases) in
-  externs ^ "\n" ^ functions ^ "\n" ^ aliases
+  let used_types = List.map ~f:print_dt used_types |> String.concat ~sep:"\n" in
+  externs ^ "\n" ^ functions ^ "\n" ^ aliases ^ "\n" ^ used_types

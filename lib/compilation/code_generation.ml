@@ -2,88 +2,20 @@ open Structure
 open Llvm
 open Tsr
 open Core
-
-exception Unexpected_type of string
-exception Internal_issue of string
-
-let rec get_data_type dt context =
-  match dt with
-  | Void -> void_type context
-  | Bool -> i1_type context
-  | Numeric format -> (
-      match format with
-      | Floating -> double_type context
-      | Signed -> i64_type context
-      | Unsigned -> i64_type context)
-  | Tuple factors ->
-      struct_type context
-        (Array.of_list (List.map ~f:(fun x -> get_data_type x context) factors))
-  | Named (name, _) -> named_struct_type context name
-
-let generate_operator_functions context current_mod =
-  let generate_operator_function op ty inst =
-    let name = Lowering.map_op_to_name op ty in
-    let return_ty = get_data_type (Lowering.op_return_type op ty) context in
-    let ty = get_data_type ty context in
-    let func_ty = function_type return_ty (Array.of_list [ ty; ty ]) in
-    let func = define_function name func_ty current_mod in
-    let builder = builder_at_end context (entry_block func) in
-    let a, b =
-      match Array.to_list (params func) with
-      | [ a; b ] -> (a, b)
-      | _ ->
-          raise
-            (Internal_issue
-               ("incorrect number of arguments in operator function " ^ name))
-    in
-    let _ = build_ret (inst a b "" builder) builder in
-    ()
-  in
-  let li = { Ast.file = ""; lines = (0, 0); columns = (0, 0) } in
-  generate_operator_function (Ast.Add li) (Numeric Unsigned) build_add;
-  generate_operator_function (Ast.Add li) (Numeric Signed) build_add;
-  generate_operator_function (Ast.Add li) (Numeric Floating) build_fadd;
-  generate_operator_function (Ast.Sub li) (Numeric Unsigned) build_sub;
-  generate_operator_function (Ast.Sub li) (Numeric Signed) build_sub;
-  generate_operator_function (Ast.Sub li) (Numeric Floating) build_fsub;
-  generate_operator_function (Ast.Mul li) (Numeric Unsigned) build_mul;
-  generate_operator_function (Ast.Mul li) (Numeric Signed) build_mul;
-  generate_operator_function (Ast.Mul li) (Numeric Floating) build_fmul;
-  generate_operator_function (Ast.Equals li) (Numeric Unsigned)
-    (build_icmp Icmp.Eq);
-  generate_operator_function (Ast.Equals li) (Numeric Signed)
-    (build_icmp Icmp.Eq);
-  generate_operator_function (Ast.Equals li) (Numeric Floating)
-    (build_fcmp Fcmp.Oeq);
-  generate_operator_function (Ast.NotEquals li) (Numeric Unsigned)
-    (build_icmp Icmp.Ne);
-  generate_operator_function (Ast.NotEquals li) (Numeric Signed)
-    (build_icmp Icmp.Ne);
-  generate_operator_function (Ast.NotEquals li) (Numeric Floating)
-    (build_fcmp Fcmp.One);
-  generate_operator_function (Ast.Less li) (Numeric Unsigned)
-    (build_icmp Icmp.Ult);
-  generate_operator_function (Ast.Less li) (Numeric Signed)
-    (build_icmp Icmp.Slt);
-  generate_operator_function (Ast.Less li) (Numeric Floating)
-    (build_fcmp Fcmp.Olt);
-  generate_operator_function (Ast.Greater li) (Numeric Unsigned)
-    (build_icmp Icmp.Ugt);
-  generate_operator_function (Ast.Greater li) (Numeric Signed)
-    (build_icmp Icmp.Sgt);
-  generate_operator_function (Ast.Greater li) (Numeric Floating)
-    (build_fcmp Fcmp.Ogt)
+open Operators
+open Data_type
 
 let rec codegen_expr expr build_context =
   let context, current_mod, builder, named_values = build_context in
+  let get_data_type_c = get_data_type context in
   match expr with
   | Literal (v, dt, li) -> (
       match dt with
-      | Numeric format -> (
+      | Numeric (format, _) -> (
           match format with
-          | Floating -> const_float (get_data_type dt context) v
-          | Signed | Unsigned ->
-              const_int (get_data_type dt context) (int_of_float v))
+          | Floating -> const_float (get_data_type_c dt) v
+          | Signed | Unsigned -> const_int (get_data_type_c dt) (int_of_float v)
+          )
       | _ ->
           raise
             (Unexpected_type
@@ -114,12 +46,12 @@ let rec codegen_expr expr build_context =
 
 let codegen_alias (name, alias) context =
   let ty = named_struct_type context name in
-  let body = get_data_type alias context in
+  let body = get_data_type context alias in
   struct_set_body ty (Array.create ~len:1 body) false
 
 let codegen_shallow_fun { Tsr.Function.name; return_type; parameters; _ }
     context current_mod =
-  let map_data_type (_, dt) = get_data_type dt context in
+  let map_data_type (_, dt) = get_data_type context dt in
   let return_type = map_data_type ((), return_type) in
   let parameters = Array.of_list (List.map ~f:map_data_type parameters) in
   let function_ty = function_type return_type parameters in
@@ -129,7 +61,7 @@ let codegen_shallow_fun { Tsr.Function.name; return_type; parameters; _ }
 (** Duplicated from above. DELETE *)
 let codegen_ext { Tsr.Extern.name; return_type; parameters; _ } context
     current_mod =
-  let map_data_type dt = get_data_type dt context in
+  let map_data_type dt = get_data_type context dt in
   let return_type = map_data_type return_type in
   let parameters = Array.of_list (List.map ~f:map_data_type parameters) in
   let function_ty = function_type return_type parameters in
@@ -153,7 +85,7 @@ let codegen_fun func context current_mod =
     value
   in
   let argument_codegen (name, ty) value =
-    let ty = get_data_type ty context in
+    let ty = get_data_type context ty in
     let location = generate_named_value name ty in
     let _ = build_store value location builder in
     ()
@@ -179,7 +111,7 @@ let codegen_fun func context current_mod =
         in
         let location =
           if not reassignment then
-            let ty = get_data_type ty context in
+            let ty = get_data_type context ty in
             generate_named_value name ty
           else
             let location = Hashtbl.find named_values name in
@@ -239,10 +171,12 @@ let codegen_fun func context current_mod =
   in
   codegen_code_block body insert_ret
 
-let generate_code name { Tsr.externs; functions; aliases } context =
+let generate_code name { Tsr.externs; functions; aliases; used_types } context =
   let _ = (externs, functions) in
   let current_mod = create_module context name in
   generate_operator_functions context current_mod;
+  let codegen_used_type_ctx = codegen_used_type context current_mod in
+  List.iter ~f:codegen_used_type_ctx used_types;
   List.iter ~f:(fun x -> codegen_alias x context) aliases;
   List.iter ~f:(fun x -> codegen_ext x context current_mod) externs;
   List.iter ~f:(fun x -> codegen_shallow_fun x context current_mod) functions;

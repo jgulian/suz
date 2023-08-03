@@ -1,8 +1,6 @@
 open Core
 open Environment
-
-exception Syntax_error of string
-exception Type_error of string
+open Option
 
 let map_op_to_name op ty =
   match op with
@@ -13,11 +11,6 @@ let map_op_to_name op ty =
   | Ast.NotEquals _ -> "_not_equals_" ^ Tsr.name_data_type ty
   | Ast.Less _ -> "_less_" ^ Tsr.name_data_type ty
   | Ast.Greater _ -> "_greater_" ^ Tsr.name_data_type ty
-
-let op_return_type op ty =
-  match op with
-  | Ast.Add _ | Ast.Sub _ | Ast.Mul _ -> ty
-  | Ast.Equals _ | Ast.NotEquals _ | Ast.Less _ | Ast.Greater _ -> Tsr.Bool
 
 let rec map_expr env expr =
   let map_expr_e = map_expr env in
@@ -37,6 +30,15 @@ let rec map_expr env expr =
         Option.value_exn ~message:error (Hashtbl.find env.scoped_variables name)
       in
       Tsr.Variable (name, dt, li)
+  | Ast.Unary (expr, op, li) -> (
+      let expr = map_expr_e expr in
+      let ty = Tsr.expr_type expr in
+      Hash_set.add !(env.used_types) ty;
+      let hash = Tsr.DataType.hash ty |> string_of_int in
+      match op with
+      | Ast.Deref _ ->
+          Tsr.Call ("_deref_" ^ hash, [ expr ], Tsr.expr_type expr, li)
+      | Ast.Not _ -> Tsr.Call ("_not_bool", [ expr ], Tsr.Bool, li))
   | Ast.Binary (lhs, rhs, op, li) ->
       let lhs = map_expr_e lhs in
       let rhs = map_expr_e rhs in
@@ -51,14 +53,32 @@ let rec map_expr env expr =
         Option.value_exn ~message:error (Hashtbl.find env.function_types name)
       in
       Tsr.Call (name, args, func_return_type, li)
-  | TupleAccess (expr, index, li) ->
-      let expr = map_expr_e expr in 
+  | Ast.TupleBuild (factors, li) ->
+      let factors = List.map ~f:map_expr_e factors in
+      let factor_tys = List.map ~f:Tsr.expr_type factors in
+      let tuple_ty = Tsr.Tuple factor_tys in
+      Hash_set.add !(env.used_types) tuple_ty;
+      let hash = string_of_int (Tsr.DataType.hash tuple_ty) in
+      Tsr.Call ("_tuple_build_" ^ hash, factors, tuple_ty, li)
+  | Ast.TupleAccess (expr, index, li) ->
+      let expr = map_expr_e expr in
       let tuple_ty = Tsr.expr_type expr in
-      Hash_set.add env.tuples tuple_ty;
-      let ty = (match tuple_ty with 
-      | Tsr.Tuple factors -> List.nth factors index | _ -> None) in 
-      let ty = Option.value_exn ~message:(Printf.sprintf "no index %d on tuple at (%s)" index (Ast.print_li li)) ty in
-      Tsr.Call ("_tuple_access_" ^ (string_of_int (Tsr.DataType.hash tuple_ty)), [expr], ty, li)
+      Hash_set.add !(env.used_types) tuple_ty;
+      let ty =
+        match tuple_ty with
+        | Tsr.Tuple factors -> List.nth factors index
+        | _ -> None
+      in
+      let ty =
+        Option.value_exn
+          ~message:
+            (Printf.sprintf "no index %d on tuple at (%s)" index
+               (Ast.print_li li))
+          ty
+      in
+      let hash = string_of_int (Tsr.DataType.hash tuple_ty) in
+      Tsr.Call
+        (Printf.sprintf "_tuple_access_%s_%d" hash index, [ expr ], ty, li)
 
 let rec map_stmt env stmt =
   let map_data_type_e = map_data_type env in
@@ -121,7 +141,7 @@ let rec map_stmt env stmt =
 
 and map_code_block env (stmts, final_expr, li) =
   let stmts = List.map ~f:(map_stmt env) stmts in
-  let final_expr = Option.map ~f:(map_expr env) final_expr in
+  let final_expr = final_expr >>| map_expr env in
   (stmts, final_expr, li)
 
 let map_extern env i =
@@ -142,6 +162,10 @@ let map_function env i =
       let parameters =
         List.map ~f:(fun (n, t) -> (n, map_data_type env t)) parameters
       in
+      let env = clone_env env in
+      List.iter
+        ~f:(fun (n, t) -> Hashtbl.set env.scoped_variables ~key:n ~data:t)
+        parameters;
       Some
         {
           Tsr.Function.return_type = map_data_type env return_type;
@@ -159,8 +183,8 @@ let filter_alias env i =
 
 let lower items =
   let env = build_environment items in
-  {
-    Tsr.externs = List.filter_map items ~f:(map_extern env);
-    functions = List.filter_map items ~f:(map_function env);
-    aliases = List.filter_map items ~f:(filter_alias env);
-  }
+  let externs = List.filter_map items ~f:(map_extern env) in
+  let functions = List.filter_map items ~f:(map_function env) in
+  let aliases = List.filter_map items ~f:(filter_alias env) in
+  let used_types = Hash_set.to_list !(env.used_types) in
+  { Tsr.externs; functions; aliases; used_types }

@@ -9,10 +9,10 @@ let () =
   let input_channel = open_in file in
   try
     let items = Builder.parse_channel input_channel (Some file) in
-    print_endline (Ast.debug_print items);
+    (* print_endline (Ast.debug_print items); *)
     newlines 5;
     let main_mod = Lowering.lower items in
-    print_endline (Tsr.debug_print main_mod);
+    (* print_endline (Tsr.debug_print main_mod); *)
     newlines 5;
     let llctx = Llvm.global_context () in
     let mod_name = "main" in

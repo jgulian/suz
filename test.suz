@@ -13,9 +13,22 @@ type B = fsize;
 type C = A;
 
 fun main() -> () {
-    let base: fsize = read_fsize();
-    let power: usize = read_usize();
-    print_fsize(pow(base, power));
+    let a: usize = read_usize();
+    let b: isize = read_isize();
+    let c: fsize = read_fsize();
+    let d: ((usize, isize), fsize) = test_pass_return_two((a, b, c));
+    print_usize(d.0.0);
+    print_isize(d.0.1);
+    print_fsize(d.1);
+}
+
+fun test_tuple(a: usize, b: isize, c: fsize) -> usize {
+    let t: (usize, isize, fsize) = (a, b, c);
+    t.0
+}
+
+fun test_pass_return_two(a: (usize, isize, fsize)) -> ((usize, isize), fsize) {
+    ((a.0, a.1), a.2)
 }
 
 fun test_calling() -> () {

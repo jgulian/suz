@@ -4,16 +4,24 @@ type environment = {
   function_types : (string, Tsr.data_type) Hashtbl.t;
   aliases : (string, Tsr.data_type) Hashtbl.t;
   scoped_variables : (string, Tsr.data_type) Hashtbl.t;
-  tuples : Tsr.data_type Hash_set.t;
 }
+
+let clone_env env =
+  {
+    function_types = Hashtbl.copy env.function_types;
+    aliases = Hashtbl.copy env.aliases;
+    scoped_variables = Hashtbl.copy env.scoped_variables;
+  }
 
 let rec map_data_type env dt =
   match dt with
   | Ast.Void _ -> Tsr.Void
   | Ast.Bool _ -> Tsr.Bool
-  | Ast.Numeric (format, _) -> Tsr.Numeric format
+  | Ast.Numeric (format, size, _) ->
+      Tsr.Numeric (format, Option.value ~default:8 size)
   | Ast.Tuple (factors, _) ->
       Tsr.Tuple (List.map ~f:(map_data_type env) factors)
+  | Ast.Pointer (inner, _) -> Tsr.Pointer (map_data_type env inner)
   | Ast.Named (name, li) ->
       let error =
         Printf.sprintf "no type alias %s in scope %s" name (Ast.print_li li)
@@ -39,6 +47,7 @@ let rec extract_alias_dependents dt =
   | Ast.Numeric _ -> []
   | Ast.Tuple (factors, _) ->
       List.concat (List.map factors ~f:extract_alias_dependents)
+  | Ast.Pointer (i, _) -> extract_alias_dependents i
   | Ast.Named (name, _) -> [ name ]
 
 let alias_list_to_map alias_list =
@@ -62,7 +71,6 @@ let update_aliases env items =
   in
   List.iter alias_deps ~f:add_edges;
   let insert_mapped_type name =
-    print_endline ("processing " ^ name);
     let data_type = map_data_type env (Hashtbl.find_exn alias_map name) in
     let _ = Hashtbl.set env.aliases ~key:name ~data:data_type in
     ()
@@ -79,7 +87,6 @@ let build_environment items =
       function_types = Hashtbl.create (module String);
       aliases = Hashtbl.create (module String);
       scoped_variables = Hashtbl.create (module String);
-      tuples = Hash_set.create (module Tsr.DataType);
     }
   in
   update_aliases env items;

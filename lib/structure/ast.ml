@@ -1,5 +1,9 @@
 open Core
 
+exception Unimplemented
+exception Syntax_error of string
+exception Type_error of string
+
 type location_information = {
   file : string;
   lines : int * int;
@@ -8,11 +12,22 @@ type location_information = {
 
 type numeric_format = Floating | Signed | Unsigned
 
-and data_type =
+let numeric_format_id nf = 
+  match nf with
+    | Floating -> 0
+    | Signed -> 1
+    | Unsigned -> 2
+
+    let compare_numeric_format a b =
+      (numeric_format_id a) - (numeric_format_id b)
+
+
+type data_type =
   | Void of location_information
   | Bool of location_information
-  | Numeric of numeric_format * location_information
+  | Numeric of numeric_format * int option * location_information
   | Tuple of data_type list * location_information
+  | Pointer of data_type * location_information
   | Named of string * location_information
 
 and binary_operation =
@@ -23,18 +38,30 @@ and binary_operation =
   | NotEquals of location_information
   | Less of location_information
   | Greater of location_information
+  
+
+type unary_operation =
+  | Not of location_information
+
+  and location = | IndexAccess of int * location_information
+  | NamedAccess of string * location_information
+  | DerefAccess of int * location_information
+  
+  and writable_expression = string * location list * location_information
 
 and expression =
   | Literal of float * data_type option * location_information
-  | Variable of string * location_information
+  | Variable of writable_expression * location_information
+  | Unary of expression * unary_operation * location_information
   | Binary of expression * expression * binary_operation * location_information
   | Call of string * expression list * location_information
+  | TupleBuild of expression list * location_information
   | TupleAccess of expression * int * location_information
 
 and statement =
   | Expression of expression * location_information
   | Assignment of string * data_type * expression * location_information
-  | Reassignment of string * expression * location_information
+  | Reassignment of writable_expression * expression * location_information
   | If of expression * code_block * location_information
   | While of expression * code_block * location_information
 
@@ -82,11 +109,16 @@ let debug_print items =
     match dt with
     | Void li -> Printf.sprintf "Void (%s)" (print_li li)
     | Bool li -> Printf.sprintf "Bool (%s)" (print_li li)
-    | Numeric (f, li) ->
-        Printf.sprintf "Numeric (%s, (%s))" (print_nf f) (print_li li)
+    | Numeric (f, size, li) ->
+        let size =
+          Option.map ~f:string_of_int size |> Option.value ~default:"_"
+        in
+        Printf.sprintf "Numeric (%s, %s, (%s))" (print_nf f) size (print_li li)
     | Tuple (factors, li) ->
         let factors = String.concat ~sep:", " (List.map ~f:print_dt factors) in
         Printf.sprintf "Tuple (%s, (%s))" factors (print_li li)
+    | Pointer (inner, li) ->
+        Printf.sprintf "Pointer (%s, (%s))" (print_dt inner) (print_li li)
     | Named (name, li) -> Printf.sprintf "Named (%s, (%s))" name (print_li li)
   in
   let print_dt_l dt_l = String.concat ~sep:", " (List.map ~f:print_dt dt_l) in
@@ -100,6 +132,10 @@ let debug_print items =
     | Less li -> Printf.sprintf "LessThan (%s)" (print_li li)
     | Greater li -> Printf.sprintf "GreaterThan (%s)" (print_li li)
   in
+  let print_uo uo =
+    match uo with
+    | Not li -> Printf.sprintf "Not (%s)" (print_li li)
+  in
   let rec print_expr expr =
     match expr with
     | Literal (v, dt, li) ->
@@ -107,11 +143,17 @@ let debug_print items =
           (Option.value ~default:"None" (Option.map ~f:print_dt dt))
           (print_li li)
     | Variable (n, li) -> Printf.sprintf "Variable (%s, (%s))" n (print_li li)
+    | Unary (inner, op, li) ->
+        Printf.sprintf "Binary (%s, %s, (%s))" (print_expr inner) (print_uo op)
+          (print_li li)
     | Binary (lhs, rhs, bo, li) ->
         Printf.sprintf "Binary (%s, %s, %s, (%s))" (print_expr lhs)
           (print_expr rhs) (print_bo bo) (print_li li)
     | Call (name, args, li) ->
         Printf.sprintf "Call (%s, (%s), (%s))" name (print_expr_list args)
+          (print_li li)
+    | TupleBuild (factors, li) ->
+        Printf.sprintf "TupleBuild (%s), (%s)" (print_expr_list factors)
           (print_li li)
     | TupleAccess (expr, index, li) ->
         Printf.sprintf "TupleAccess (%s, %d, (%s))" (print_expr expr) index
@@ -119,6 +161,13 @@ let debug_print items =
   and print_expr_list expr_list =
     String.concat ~sep:", " (List.map ~f:print_expr expr_list)
   in
+  let print_location loc = 
+    begin
+      match loc with 
+        | IndexAccess (index, li) -> Printf.sprintf "IndexAccess (%d, (%s))" index (print_li li)
+        | NamedAccess (name, li) -> Printf.sprintf "NamedAccess (%s, (%s))" name (print_li li)
+        | DerefAccess (index, li) -> Printf.sprintf "DerefAccess (%d, (%s))" index (print_li li)
+    end in
   let rec print_stmt stmt i =
     match stmt with
     | Expression (expr, li) ->
@@ -126,8 +175,9 @@ let debug_print items =
     | Assignment (name, dt, expr, li) ->
         Printf.sprintf "Assignment (%s, %s, %s, (%s))" name (print_dt dt)
           (print_expr expr) (print_li li)
-    | Reassignment (name, expr, li) ->
-        Printf.sprintf "Reassignment (%s, %s, (%s))" name (print_expr expr)
+    | Reassignment (name, path, expr, li) ->
+        let path = List.map ~f:print_location path |> String.concat ~sep:", " in
+        Printf.sprintf "Reassignment (%s, %s, %s, (%s))" name path (print_expr expr)
           (print_li li)
     | If (expr, body, li) ->
         let tabs = nt i in
@@ -204,7 +254,11 @@ let parse_numeric_type s li =
     | 'u' -> Unsigned
     | _ -> raise (Invalid_argument "not well formatted numeric literal")
   in
-  Numeric (ty, li)
+  if String.is_substring_at s ~pos:1 ~substring:"size" then
+    Numeric (ty, None, li)
+  else
+    let size = String.subo s ~pos:1 |> int_of_string |> ( / ) 8 in
+    Numeric (ty, Some size, li)
 
 let parse_numeric_literal s li =
   (* An exception should not be raised here because the split should always
