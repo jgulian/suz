@@ -10,8 +10,23 @@ The Tsr is then lowered to llvm ir which is compiled to the binary using clang.
 Because of this, beyond the requirements presented, it also requires clang be 
 present on the system.
 
+The language currently supports 
+ * Function calling
+ * If/While statements
+ * Foreign function interface
+ * Pointer manipulation both dereferencing and array dereferencing
+ * Tuple types, construction and accessing
+ * Pass by value and pass by reference
+
+I have several other features planned.
+The codebase is also not performant. 
+For instance, the code generation for expressions is very liberal in it's use 
+of allocations.
+
 Below is an example of the syntax. 
 A lot more syntax can be found in the `test.suz` file.
+Note that there is type aliasing, but it is not complete, so while they can be
+defined, they can not be constructed or deconstructed.
 
 ```
 ext read_int() -> usize;

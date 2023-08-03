@@ -37,9 +37,7 @@ let rec codegen_expr build_context expr =
       pointer
   | Unary (expr, op, _, _) -> 
     let expr = codegen_expr_r expr in 
-    print_endline "here 1";
     let expr = build_load expr "" builder in
-    print_endline "here 2";
     begin
       match op with 
       | Not -> build_not expr "" builder
@@ -76,10 +74,9 @@ let rec codegen_expr build_context expr =
   | Binary (lhs, rhs, op, dt, _) ->
       let ty = expr_type lhs in
       let lhs = codegen_expr_r lhs in
-      print_endline "here 3";
-      let lhs = build_load lhs "" builder in print_endline "here 4";
+      let lhs = build_load lhs "" builder in
       let rhs = codegen_expr_r rhs in
-      let rhs = build_load rhs "" builder in print_endline "here 5";
+      let rhs = build_load rhs "" builder in
       let value = (codegen_binary_instruction op ty) lhs rhs "" builder in 
       let ty = get_data_type_c dt in
       let location = build_alloca ty "" builder in 
@@ -92,10 +89,7 @@ let rec codegen_expr build_context expr =
       let ty = struct_type context factor_tys in
       let location = build_alloca ty "" builder in
       let store_factor index factor =
-        print_endline "gere 1";
         let pointer = build_struct_gep location index "" builder in
-        string_of_llvalue pointer |> (^) "TupleConstruction " |> print_endline;
-        print_endline "gere 2";
         let _ = build_store factor pointer builder in
         index + 1
       in
@@ -103,18 +97,12 @@ let rec codegen_expr build_context expr =
       location
   | TupleAccess (expr, index, _, _) ->
       let location = codegen_expr_r expr in
-      print_endline "gere 3";
-      let r = build_struct_gep location index "" builder in 
-      string_of_llvalue r |> (^) "TupleAccess " |> print_endline;
-      print_endline "gere 4"; r
+      build_struct_gep location index "" builder
   | IndexDeref (expr, index, _, _) ->
       let expr = codegen_expr_r expr in
       let index = codegen_expr_r index in
       let index = build_load index "" builder in 
-      print_endline "gere 5";
-      let r = build_gep expr (Array.of_list [ index ]) "" builder in 
-      string_of_llvalue r |> (^) "IndexDeref " |> print_endline;
-      print_endline "gere 6"; build_load r "" builder
+      (build_gep expr (Array.of_list [ index ]) "" builder |> build_load) "" builder
 
 let codegen_alias (name, alias) context =
   let ty = named_struct_type context name in
@@ -151,26 +139,16 @@ let resolve_location build_context source path li =
   let location, _ = Option.value_exn ~message:error location in
   let map_location value action =
     match action with
-    | Access (i, _) ->
-      print_endline "gere 7";
-        let r = build_struct_gep value i "" builder in print_endline "gere 8"; 
-        string_of_llvalue r |> (^) "Access " |> print_endline;
-        r
+    | Access (i, _) -> build_struct_gep value i "" builder
     | Deref (i, _) ->
-      print_endline "here 6";
         let value = build_load value "" builder in 
-        print_endline "here 7";
         let value_storage = build_alloca (type_of value) "" builder in
         let _ = build_store value value_storage builder in
         let value = value_storage in
         let value = build_load value "" builder in
-        print_endline "here 8";
         let indices = Array.of_list [ codegen_expr build_context i ] in
         let indices = Array.map ~f:(fun x -> build_load x "" builder) indices in 
-        print_endline "gere 9";
-        let r = build_gep value indices "" builder in print_endline "gere 10"; 
-        string_of_llvalue r |> (^) "Deref " |> print_endline;
-        r
+        build_gep value indices "" builder
   in
   if List.is_empty path then location
   else List.fold ~init:location ~f:map_location path
@@ -230,10 +208,8 @@ let codegen_fun func context current_mod =
               (context, current_mod, builder, named_values)
               name path li
         in
-        print_endline ("here 9 " ^ (string_of_llvalue value) ^ " " ^ (type_of value |> string_of_lltype));
         let value = build_load value "" builder in 
-        print_endline "here 10";
-        let s = build_store value location builder in print_endline ("Assignment" ^ (string_of_llvalue s));
+        let _ = build_store value location builder in ()
     | Conditional (expr, body, repeated, _) ->
         let condition_bb =
           append_block context generate_basic_block_name func
